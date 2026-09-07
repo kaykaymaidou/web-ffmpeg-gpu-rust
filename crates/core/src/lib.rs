@@ -8,6 +8,12 @@ pub mod muxer;
 pub mod packet;
 pub mod timeline;
 
+pub use bitstream::{
+    annex_b_to_avcc, avcc_to_annex_b, build_avcc, build_hvcc, parse_hevc_sps, parse_sps,
+    split_annex_b, split_hevc_annex_b, HevcNalUnit, HevcNalUnitType, HevcSpsInfo, NalUnit,
+    NalUnitType, SpsInfo,
+};
+pub use demuxer::{Mp4Demuxer, RustDemuxedSample, RustDemuxedTrack};
 pub use engine::{create_rust_packet, create_rust_timeline, RustDemuxer, RustStreamAnalyzer, RustWasmMp4Muxer};
 pub use filter::RustCpuFilter;
 pub use frame::{ColorSpace, FrameMetadata, PixelFormat};

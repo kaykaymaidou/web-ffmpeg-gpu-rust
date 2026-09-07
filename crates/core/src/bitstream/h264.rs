@@ -117,6 +117,26 @@ impl<'a> BitReader<'a> {
         let base = (1u32.checked_shl(leading_zeros as u32)?) - 1;
         base.checked_add(suffix)
     }
+
+    /// Read a signed exponential-Golomb coded integer se(v).
+    pub fn read_se(&mut self) -> Option<i32> {
+        let code_num = self.read_ue()?;
+        if code_num == 0 {
+            Some(0)
+        } else {
+            let sign = if (code_num & 1) == 0 { -1 } else { 1 };
+            let val = ((code_num + 1) / 2) as i32 * sign;
+            Some(val)
+        }
+    }
+
+    /// Skip n bits in the bitstream.
+    pub fn skip_bits(&mut self, n: usize) -> Option<()> {
+        for _ in 0..n {
+            self.read_bit()?;
+        }
+        Some(())
+    }
 }
 
 /// Split Annex-B bitstream (`00 00 00 01` or `00 00 01`) into separate NAL units.

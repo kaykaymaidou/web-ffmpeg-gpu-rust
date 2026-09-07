@@ -173,42 +173,102 @@ impl RustFlvDemuxer {
 
             if tag_type_byte == 9 && data_size >= 5 {
                 // Video Tag
-                let frame_type = (payload[0] >> 4) & 0x0f;
-                let codec_id = payload[0] & 0x0f;
-                let is_keyframe = frame_type == 1;
+                let is_extended_header = (payload[0] & 0x80) != 0;
 
-                if codec_id == 7 {
-                    // AVC / H.264
-                    let avc_packet_type = payload[1];
-                    let cts_ms = ((payload[2] as i32) << 16)
-                        | ((payload[3] as i32) << 8)
-                        | (payload[4] as i32);
-                    let pts_ms = (dts_ms as i64) + (cts_ms as i64);
+                if is_extended_header {
+                    // Enhanced FLV v2 Video Header
+                    let frame_type = (payload[0] >> 4) & 0x07;
+                    let packet_type = payload[0] & 0x0f;
+                    let is_keyframe = frame_type == 1;
+                    let fourcc = &payload[1..5];
 
-                    if avc_packet_type == 1 {
-                        // NALU packets (length-prefixed)
-                        let nalu_data = payload[5..].to_vec();
-                        let pts_us = pts_ms * 1000;
-                        let dts_us = (dts_ms as i64) * 1000;
+                    if packet_type == 1 {
+                        // Coded frames
+                        if (fourcc == b"hvc1" || fourcc == b"hev1") && data_size >= 8 {
+                            let cts_ms = ((payload[5] as i32) << 16)
+                                | ((payload[6] as i32) << 8)
+                                | (payload[7] as i32);
+                            let pts_ms = (dts_ms as i64) + (cts_ms as i64);
+                            let nalu_data = payload[8..].to_vec();
+                            let pts_us = pts_ms * 1000;
+                            let dts_us = (dts_ms as i64) * 1000;
 
-                        packet = Some(Packet::new(
-                            pts_us,
-                            dts_us,
-                            33333,
-                            is_keyframe,
-                            0, // Video stream index
-                            nalu_data,
-                        ));
+                            packet = Some(Packet::new(
+                                pts_us,
+                                dts_us,
+                                33333,
+                                is_keyframe,
+                                0, // Video stream index
+                                nalu_data,
+                            ));
+                        } else if fourcc == b"av01" && data_size >= 5 {
+                            let obus_data = payload[5..].to_vec();
+                            let pts_us = (dts_ms as i64) * 1000;
+
+                            packet = Some(Packet::new(
+                                pts_us,
+                                pts_us,
+                                33333,
+                                is_keyframe,
+                                0,
+                                obus_data,
+                            ));
+                        }
+                    }
+                } else {
+                    // Standard / Legacy FLV Video Tag (AVC / H.264)
+                    let frame_type = (payload[0] >> 4) & 0x0f;
+                    let codec_id = payload[0] & 0x0f;
+                    let is_keyframe = frame_type == 1;
+
+                    if codec_id == 7 {
+                        let avc_packet_type = payload[1];
+                        let cts_ms = ((payload[2] as i32) << 16)
+                            | ((payload[3] as i32) << 8)
+                            | (payload[4] as i32);
+                        let pts_ms = (dts_ms as i64) + (cts_ms as i64);
+
+                        if avc_packet_type == 1 {
+                            let nalu_data = payload[5..].to_vec();
+                            let pts_us = pts_ms * 1000;
+                            let dts_us = (dts_ms as i64) * 1000;
+
+                            packet = Some(Packet::new(
+                                pts_us,
+                                dts_us,
+                                33333,
+                                is_keyframe,
+                                0, // Video stream index
+                                nalu_data,
+                            ));
+                        }
                     }
                 }
             } else if tag_type_byte == 8 && data_size >= 2 {
                 // Audio Tag
                 let sound_format = (payload[0] >> 4) & 0x0f;
-                if sound_format == 10 {
-                    // AAC
+
+                if sound_format == 14 && data_size >= 5 {
+                    // Enhanced Audio (ExAudio)
+                    let packet_type = payload[0] & 0x0f;
+                    let fourcc = &payload[1..5];
+
+                    if fourcc == b"Opus" && packet_type == 1 {
+                        let opus_data = payload[5..].to_vec();
+                        let pts_us = (dts_ms as i64) * 1000;
+                        packet = Some(Packet::new(
+                            pts_us,
+                            pts_us,
+                            20000, // 20ms typical Opus frame
+                            true,
+                            1, // Audio stream index
+                            opus_data,
+                        ));
+                    }
+                } else if sound_format == 10 {
+                    // Standard AAC
                     let aac_packet_type = payload[1];
                     if aac_packet_type == 1 {
-                        // Raw AAC frame
                         let aac_data = payload[2..].to_vec();
                         let pts_us = (dts_ms as i64) * 1000;
                         packet = Some(Packet::new(
@@ -288,5 +348,74 @@ mod tests {
         assert_eq!(packet.pts(), 100_000); // 100ms in us
         assert_eq!(packet.stream_index(), 0);
         assert_eq!(packet.data(), vec![0xaa, 0xbb]);
+    }
+
+    #[test]
+    fn test_enhanced_flv_hevc_demux() {
+        let mut demuxer = RustFlvDemuxer::new();
+        let mut stream = Vec::new();
+
+        // 1. FLV Header
+        stream.extend_from_slice(b"FLV\x01\x05\x00\x00\x00\x09");
+        stream.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // 2. Enhanced Video Tag: TagType=9, DataSize=12, Timestamp=200ms
+        // Header(11) + Payload(12) + PrevTagSize(4)
+        stream.push(9);
+        stream.extend_from_slice(&[0x00, 0x00, 0x0c]); // 12 bytes payload
+        stream.extend_from_slice(&[0x00, 0x00, 0xc8]); // 200ms DTS
+        stream.push(0x00);
+        stream.extend_from_slice(&[0x00, 0x00, 0x00]);
+
+        // Enhanced Video Payload:
+        // ExHeader(0x80) | Keyframe(0x10) | CodedFrames(0x01) = 0x91
+        stream.push(0x91);
+        stream.extend_from_slice(b"hvc1"); // FourCC
+        stream.extend_from_slice(&[0x00, 0x00, 0x14]); // CTS = 20ms
+        stream.extend_from_slice(&[0x26, 0x01, 0x11, 0x22]); // HEVC IDR NAL
+
+        // PrevTagSize (11 + 12 = 23 = 0x17)
+        stream.extend_from_slice(&[0x00, 0x00, 0x00, 0x17]);
+
+        demuxer.append_bytes(&stream);
+        let pkt = demuxer.demux_next_packet().expect("Enhanced HEVC packet must demux");
+        assert!(pkt.is_keyframe());
+        assert_eq!(pkt.stream_index(), 0);
+        // DTS = 200ms, CTS = 20ms -> PTS = 220ms (220_000 us)
+        assert_eq!(pkt.pts(), 220_000);
+        assert_eq!(pkt.dts(), 200_000);
+        assert_eq!(pkt.data(), vec![0x26, 0x01, 0x11, 0x22]);
+    }
+
+    #[test]
+    fn test_enhanced_flv_opus_demux() {
+        let mut demuxer = RustFlvDemuxer::new();
+        let mut stream = Vec::new();
+
+        // 1. FLV Header
+        stream.extend_from_slice(b"FLV\x01\x05\x00\x00\x00\x09");
+        stream.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // 2. Enhanced Audio Tag: TagType=8, DataSize=8, Timestamp=50ms
+        stream.push(8);
+        stream.extend_from_slice(&[0x00, 0x00, 0x08]); // 8 bytes payload
+        stream.extend_from_slice(&[0x00, 0x00, 0x32]); // 50ms DTS
+        stream.push(0x00);
+        stream.extend_from_slice(&[0x00, 0x00, 0x00]);
+
+        // Enhanced Audio Payload:
+        // ExAudio(0xe0) | CodedFrames(0x01) = 0xe1
+        stream.push(0xe1);
+        stream.extend_from_slice(b"Opus"); // FourCC
+        stream.extend_from_slice(&[0xfc, 0xaa, 0xbb]); // Opus payload
+
+        // PrevTagSize (11 + 8 = 19 = 0x13)
+        stream.extend_from_slice(&[0x00, 0x00, 0x00, 0x13]);
+
+        demuxer.append_bytes(&stream);
+        let pkt = demuxer.demux_next_packet().expect("Enhanced Opus packet must demux");
+        assert_eq!(pkt.stream_index(), 1); // Audio
+        assert_eq!(pkt.pts(), 50_000);
+        assert_eq!(pkt.data(), vec![0xfc, 0xaa, 0xbb]);
     }
 }

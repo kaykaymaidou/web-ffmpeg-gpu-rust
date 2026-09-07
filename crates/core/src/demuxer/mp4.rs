@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use crate::bitstream::h264::{build_avcc, parse_sps, NalUnitType};
+use crate::bitstream::h265::{build_hvcc, parse_hevc_sps, HevcNalUnitType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RustDemuxedSample {
@@ -52,6 +54,12 @@ impl<'a> Mp4Demuxer<'a> {
             }
 
             offset += box_size;
+        }
+
+        if tracks.is_empty() {
+            if let Some(salvaged) = self.salvage_truncated_mdat() {
+                tracks.push(salvaged);
+            }
         }
 
         tracks
@@ -343,4 +351,292 @@ impl<'a> Mp4Demuxer<'a> {
     fn read_tag(&self, offset: usize) -> String {
         String::from_utf8_lossy(&self.data[offset..offset + 4]).to_string()
     }
+
+    /// Port of FAIL-05 salvage scanner down to pure Rust native core.
+    /// Rescues orphaned video frames from truncated/incomplete MP4 files
+    /// when the container ends prematurely without a finalized `moov` box.
+    pub fn salvage_truncated_mdat(&self) -> Option<RustDemuxedTrack> {
+        if self.data.is_empty() {
+            return None;
+        }
+
+        // 1. Locate mdat payload offset
+        let mut mdat_start = 0;
+        let mut mdat_end = self.data.len();
+
+        let mut offset = 0;
+        while offset + 8 <= self.data.len() {
+            let size = self.read_u32(offset) as usize;
+            let tag = self.read_tag(offset + 4);
+
+            if tag == "mdat" {
+                mdat_start = if size == 1 && offset + 16 <= self.data.len() {
+                    offset + 16
+                } else {
+                    offset + 8
+                };
+                if size > 1 && offset + size <= self.data.len() {
+                    mdat_end = offset + size;
+                }
+                break;
+            }
+
+            if size == 0 {
+                break;
+            }
+            offset += size;
+        }
+
+        if mdat_start >= mdat_end || mdat_start >= self.data.len() {
+            // Fallback: scan whole buffer if mdat tag not found or at boundary
+            mdat_start = 0;
+            mdat_end = self.data.len();
+        }
+
+        let mdat_data = &self.data[mdat_start..mdat_end];
+        if mdat_data.len() < 4 {
+            return None;
+        }
+
+        // 2. Scan for Annex-B start codes (00 00 01 or 00 00 00 01)
+        let mut start_indices = Vec::new();
+        let mut i = 0;
+        let len = mdat_data.len();
+        while i + 2 < len {
+            if mdat_data[i] == 0 && mdat_data[i + 1] == 0 {
+                if mdat_data[i + 2] == 1 {
+                    start_indices.push((i, 3));
+                    i += 3;
+                    continue;
+                } else if i + 3 < len && mdat_data[i + 2] == 0 && mdat_data[i + 3] == 1 {
+                    start_indices.push((i, 4));
+                    i += 4;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        if start_indices.is_empty() {
+            return None;
+        }
+
+        let mut sps_bytes: Option<Vec<u8>> = None;
+        let mut pps_bytes: Option<Vec<u8>> = None;
+        let mut vps_bytes: Option<Vec<u8>> = None;
+
+        let mut width = 1920;
+        let mut height = 1080;
+        let mut codec = "avc1.640028".to_string();
+
+        // 3. Inspect NAL units to detect codec (H.264 vs H.265)
+        let mut is_hevc = false;
+        for idx in 0..start_indices.len() {
+            let (pos, prefix_len) = start_indices[idx];
+            let nal_start = pos + prefix_len;
+            if nal_start < len {
+                let b0 = mdat_data[nal_start];
+                if NalUnitType::from_byte(b0) == NalUnitType::Sps {
+                    is_hevc = false;
+                    break;
+                }
+                let hevc_t = HevcNalUnitType::from_byte(b0);
+                if (b0 & 0x80 == 0) && (hevc_t == HevcNalUnitType::VpsNut || hevc_t == HevcNalUnitType::SpsNut) {
+                    is_hevc = true;
+                    break;
+                }
+            }
+        }
+
+        // 4. Extract parameter sets according to detected codec
+        for idx in 0..start_indices.len() {
+            let (pos, prefix_len) = start_indices[idx];
+            let nal_start = pos + prefix_len;
+            let nal_end = if idx + 1 < start_indices.len() {
+                start_indices[idx + 1].0
+            } else {
+                len
+            };
+
+            if nal_start < nal_end {
+                let nal = &mdat_data[nal_start..nal_end];
+                let b0 = nal[0];
+
+                if is_hevc {
+                    let hevc_type = HevcNalUnitType::from_byte(b0);
+                    if hevc_type == HevcNalUnitType::VpsNut && vps_bytes.is_none() {
+                        vps_bytes = Some(nal.to_vec());
+                    } else if hevc_type == HevcNalUnitType::SpsNut && sps_bytes.is_none() {
+                        sps_bytes = Some(nal.to_vec());
+                        if let Some(sps_info) = parse_hevc_sps(nal) {
+                            width = sps_info.width;
+                            height = sps_info.height;
+                            codec = sps_info.codec_string;
+                        }
+                    } else if hevc_type == HevcNalUnitType::PpsNut && pps_bytes.is_none() {
+                        pps_bytes = Some(nal.to_vec());
+                    }
+                } else {
+                    let h264_type = NalUnitType::from_byte(b0);
+                    if h264_type == NalUnitType::Sps && sps_bytes.is_none() {
+                        sps_bytes = Some(nal.to_vec());
+                        if let Some(sps_info) = parse_sps(nal) {
+                            width = sps_info.width;
+                            height = sps_info.height;
+                            codec = sps_info.codec_string;
+                        }
+                    } else if h264_type == NalUnitType::Pps && pps_bytes.is_none() {
+                        pps_bytes = Some(nal.to_vec());
+                    }
+                }
+            }
+        }
+
+        // 4. Build description
+        let description = if is_hevc {
+            if let (Some(vps), Some(sps), Some(pps)) = (&vps_bytes, &sps_bytes, &pps_bytes) {
+                Some(build_hvcc(vps, sps, pps))
+            } else {
+                None
+            }
+        } else {
+            if let (Some(sps), Some(pps)) = (&sps_bytes, &pps_bytes) {
+                Some(build_avcc(sps, pps))
+            } else {
+                None
+            }
+        };
+
+        // 5. Group NALs into samples (slices / frames)
+        let mut samples = Vec::new();
+        let frame_duration_us: u64 = 33333; // ~30 fps default
+        let mut current_ts: i64 = 0;
+
+        for idx in 0..start_indices.len() {
+            let (pos, prefix_len) = start_indices[idx];
+            let nal_end = if idx + 1 < start_indices.len() {
+                start_indices[idx + 1].0
+            } else {
+                len
+            };
+
+            let sample_offset = mdat_start + pos;
+            let sample_size = nal_end - pos;
+
+            if sample_size == 0 {
+                continue;
+            }
+
+            let nal_first_byte = mdat_data[pos + prefix_len];
+            let is_key = if is_hevc {
+                HevcNalUnitType::from_byte(nal_first_byte).is_keyframe()
+            } else {
+                NalUnitType::from_byte(nal_first_byte).is_keyframe()
+            };
+
+            // Only consider VCL frames as video samples (exclude standalone SPS/PPS)
+            let is_vcl = if is_hevc {
+                let t = HevcNalUnitType::from_byte(nal_first_byte);
+                !t.is_param_set() && t != HevcNalUnitType::AudNut && t != HevcNalUnitType::PrefixSeiNut
+            } else {
+                let t = NalUnitType::from_byte(nal_first_byte);
+                t == NalUnitType::IdrSlice || t == NalUnitType::NonIdrSlice
+            };
+
+            if is_vcl {
+                samples.push(RustDemuxedSample {
+                    is_key,
+                    timestamp_us: current_ts,
+                    duration_us: frame_duration_us,
+                    offset: sample_offset,
+                    size: sample_size,
+                });
+                current_ts += frame_duration_us as i64;
+            }
+        }
+
+        if samples.is_empty() {
+            // If strict VCL check had 0, treat any NAL unit as sample
+            for idx in 0..start_indices.len() {
+                let (pos, _) = start_indices[idx];
+                let nal_end = if idx + 1 < start_indices.len() {
+                    start_indices[idx + 1].0
+                } else {
+                    len
+                };
+                let sample_size = nal_end - pos;
+                if sample_size > 0 {
+                    samples.push(RustDemuxedSample {
+                        is_key: idx == 0,
+                        timestamp_us: current_ts,
+                        duration_us: frame_duration_us,
+                        offset: mdat_start + pos,
+                        size: sample_size,
+                    });
+                    current_ts += frame_duration_us as i64;
+                }
+            }
+        }
+
+        if samples.is_empty() {
+            return None;
+        }
+
+        Some(RustDemuxedTrack {
+            id: 1,
+            codec,
+            width,
+            height,
+            timescale: 1_000_000,
+            description,
+            samples,
+        })
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_salvage_truncated_headless_mp4() {
+        // Construct truncated MP4 data: ftyp box followed by unclosed mdat with Annex-B H.264 frames
+        let mut data = Vec::new();
+
+        // 1. ftyp box (32 bytes)
+        data.extend_from_slice(&32u32.to_be_bytes());
+        data.extend_from_slice(b"ftyp");
+        data.extend_from_slice(b"isom\0\0\x02\0isommp41mp42avc1");
+
+        // 2. mdat box with size = 0 (extends to EOF) or truncated size
+        let mdat_pos = data.len();
+        data.extend_from_slice(&0u32.to_be_bytes()); // size = 0 means to EOF
+        data.extend_from_slice(b"mdat");
+
+        // SPS (type 7)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1f]);
+        // PPS (type 8)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80]);
+        // IDR slice (type 5)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00, 0x11, 0x22]);
+        // Non-IDR slice (type 1)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x01, 0x33, 0x44]);
+
+        let demuxer = Mp4Demuxer::new(&data);
+        let tracks = demuxer.parse();
+
+        // Must successfully recover 1 track via salvage scanner
+        assert_eq!(tracks.len(), 1);
+        let track = &tracks[0];
+        assert_eq!(track.id, 1);
+        assert!(track.description.is_some());
+        // At least 2 VCL samples (IDR + Non-IDR) salvaged
+        assert_eq!(track.samples.len(), 2);
+        assert!(track.samples[0].is_key);
+        assert!(!track.samples[1].is_key);
+        assert_eq!(track.samples[0].timestamp_us, 0);
+        assert_eq!(track.samples[1].timestamp_us, 33333);
+        assert!(track.samples[0].offset >= mdat_pos + 8);
+    }
+}
+
