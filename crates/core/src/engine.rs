@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 use crate::demuxer::mp4::{Mp4Demuxer, RustDemuxedTrack};
+use crate::bitstream::converter::{annex_b_to_avcc, avcc_to_annex_b};
 use crate::bitstream::h264::{build_avcc, parse_sps, split_annex_b, NalUnitType};
+use crate::bitstream::h265::{build_hvcc, parse_hevc_sps, split_hevc_annex_b, HevcNalUnitType};
 use crate::muxer::mp4::{RustMp4Muxer, VideoTrackConfig, AudioTrackConfig};
 use crate::timeline::TimelineQueue;
 use crate::packet::Packet;
@@ -26,7 +28,7 @@ impl RustDemuxer {
         self.tracks.len()
     }
 
-    /// Primary video track codec string (e.g. "avc1.640028").
+    /// Primary video track codec string (e.g. "avc1.640028" or "hvc1.1.6.L93.B0").
     pub fn video_codec(&self) -> Option<String> {
         self.tracks.first().map(|t| t.codec.clone())
     }
@@ -43,7 +45,15 @@ impl RustDemuxer {
         self.tracks.first().map(|t| t.timescale).unwrap_or(30000)
     }
 
-    /// Extradata description box (e.g. avcC).
+    /// Check if primary video track is HEVC / H.265.
+    pub fn is_hevc(&self) -> bool {
+        self.tracks
+            .first()
+            .map(|t| t.codec.starts_with("hvc1") || t.codec.starts_with("hev1"))
+            .unwrap_or(false)
+    }
+
+    /// Extradata description box (e.g. avcC or hvcC).
     pub fn video_description(&self) -> Option<Vec<u8>> {
         self.tracks.first().and_then(|t| t.description.clone())
     }
@@ -91,11 +101,16 @@ impl RustDemuxer {
     }
 }
 
-/// Rust-native stream feeder with in-band SPS/PPS parameter set extraction.
+/// Rust-native stream feeder with in-band parameter set extraction (H.264 avcC & H.265 hvcC + HDR10).
 #[wasm_bindgen]
 pub struct RustStreamAnalyzer {
     current_sps: Option<Vec<u8>>,
     current_pps: Option<Vec<u8>>,
+    current_hevc_vps: Option<Vec<u8>>,
+    current_hevc_sps: Option<Vec<u8>>,
+    current_hevc_pps: Option<Vec<u8>>,
+    is_hevc: bool,
+    is_hdr: bool,
 }
 
 #[wasm_bindgen]
@@ -105,12 +120,60 @@ impl RustStreamAnalyzer {
         Self {
             current_sps: None,
             current_pps: None,
+            current_hevc_vps: None,
+            current_hevc_sps: None,
+            current_hevc_pps: None,
+            is_hevc: false,
+            is_hdr: false,
         }
+    }
+
+    /// Check if analyzed stream is H.265 / HEVC.
+    pub fn is_hevc(&self) -> bool {
+        self.is_hevc
+    }
+
+    /// Check if analyzed stream has HDR10 colorimetry (BT.2020 / PQ / HLG).
+    pub fn is_hdr(&self) -> bool {
+        self.is_hdr
     }
 
     /// Analyze a streaming packet chunk.
     /// Returns codec string if SPS was detected/updated.
     pub fn analyze_packet(&mut self, data: &[u8]) -> Option<String> {
+        // 1. Try H.265 NAL parsing
+        let hevc_nals = split_hevc_annex_b(data);
+        let has_hevc_ps = hevc_nals.iter().any(|n| n.unit_type.is_param_set());
+
+        if has_hevc_ps {
+            self.is_hevc = true;
+            let mut codec_str = None;
+
+            for nal in hevc_nals {
+                match nal.unit_type {
+                    HevcNalUnitType::VpsNut => {
+                        self.current_hevc_vps = Some(nal.data.to_vec());
+                    }
+                    HevcNalUnitType::SpsNut => {
+                        self.current_hevc_sps = Some(nal.data.to_vec());
+                        if let Some(info) = parse_hevc_sps(nal.data) {
+                            self.is_hdr = info.is_hdr;
+                            codec_str = Some(info.codec_string);
+                        }
+                    }
+                    HevcNalUnitType::PpsNut => {
+                        self.current_hevc_pps = Some(nal.data.to_vec());
+                    }
+                    _ => {}
+                }
+            }
+
+            if codec_str.is_some() {
+                return codec_str;
+            }
+        }
+
+        // 2. Fallback to H.264 NAL parsing
         let nals = split_annex_b(data);
         let mut updated_codec = None;
 
@@ -132,6 +195,18 @@ impl RustStreamAnalyzer {
         updated_codec
     }
 
+    /// Build configuration description box: `hvcC` for HEVC or `avcC` for H.264.
+    pub fn get_description(&self) -> Option<Vec<u8>> {
+        if self.is_hevc {
+            match (&self.current_hevc_vps, &self.current_hevc_sps, &self.current_hevc_pps) {
+                (Some(vps), Some(sps), Some(pps)) => Some(build_hvcc(vps, sps, pps)),
+                _ => None,
+            }
+        } else {
+            self.get_avcc_description()
+        }
+    }
+
     /// Build AVCC extradata configuration from stored SPS and PPS.
     pub fn get_avcc_description(&self) -> Option<Vec<u8>> {
         match (&self.current_sps, &self.current_pps) {
@@ -140,11 +215,40 @@ impl RustStreamAnalyzer {
         }
     }
 
-    /// Check if packet contains an IDR keyframe slice.
+    /// Check if packet contains an IDR / IRAP keyframe slice.
     pub fn is_keyframe(&self, data: &[u8]) -> bool {
-        let nals = split_annex_b(data);
-        nals.iter().any(|n| n.unit_type == NalUnitType::IdrSlice)
+        if self.is_hevc {
+            let nals = split_hevc_annex_b(data);
+            nals.iter().any(|n| n.unit_type.is_keyframe())
+        } else {
+            let nals = split_annex_b(data);
+            nals.iter().any(|n| n.unit_type == NalUnitType::IdrSlice)
+        }
     }
+}
+
+/// Standalone WASM converter: Annex-B to AVCC.
+#[wasm_bindgen]
+pub fn rust_annex_b_to_avcc(annex_b: &[u8]) -> Vec<u8> {
+    annex_b_to_avcc(annex_b)
+}
+
+/// Standalone WASM converter: AVCC to Annex-B.
+#[wasm_bindgen]
+pub fn rust_avcc_to_annex_b(avcc: &[u8]) -> Vec<u8> {
+    avcc_to_annex_b(avcc)
+}
+
+/// Standalone WASM builder: build ISO 14496-15 hvcC box.
+#[wasm_bindgen]
+pub fn rust_build_hvcc(vps: &[u8], sps: &[u8], pps: &[u8]) -> Vec<u8> {
+    build_hvcc(vps, sps, pps)
+}
+
+/// Standalone WASM builder: build ISO 14496-15 avcC box.
+#[wasm_bindgen]
+pub fn rust_build_avcc(sps: &[u8], pps: &[u8]) -> Vec<u8> {
+    build_avcc(sps, pps)
 }
 
 /// Helper to create and initialize a Rust Timeline queue.
