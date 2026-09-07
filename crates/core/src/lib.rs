@@ -1,6 +1,14 @@
-pub mod packet;
+pub mod bitstream;
+pub mod demuxer;
+pub mod engine;
 pub mod frame;
+pub mod packet;
 pub mod timeline;
+
+pub use engine::{create_rust_packet, create_rust_timeline, RustDemuxer, RustStreamAnalyzer};
+pub use frame::{ColorSpace, FrameMetadata, PixelFormat};
+pub use packet::Packet;
+pub use timeline::TimelineQueue;
 
 use wasm_bindgen::prelude::*;
 
@@ -13,13 +21,11 @@ extern "C" {
 /// Initialize panic hook and logging for debugging in browser console.
 #[wasm_bindgen]
 pub fn init_core() {
-    #[cfg(feature = "console_error_panic_hook")]
-    console_error_panic_hook::set_once();
-    log("🚀 [Web-FFmpeg-Core] Rust WASM Media Engine initialized successfully.");
+    log("🚀 [Web-FFmpeg-Core] Rust Native WASM Media Engine initialized successfully.");
 }
 
 /// Inspect capabilities and print version.
 #[wasm_bindgen]
 pub fn get_engine_version() -> String {
-    "0.1.0-alpha (Web-FFmpeg-GPU)".to_string()
+    "0.1.0-alpha (Rust-Native Web-FFmpeg-GPU)".to_string()
 }

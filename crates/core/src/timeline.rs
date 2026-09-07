@@ -97,3 +97,37 @@ impl TimelineQueue {
         self.last_emitted_pts = -1;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_b_frame_reordering() {
+        let mut scheduler = TimelineQueue::new(3);
+
+        // Simulated out-of-order decode packets: DTS=0 (PTS=2000), DTS=1 (PTS=1000), DTS=2 (PTS=3000)
+        let p1 = Packet::new(2000, 0, 1000, false, 0, vec![1]);
+        let p2 = Packet::new(1000, 1, 1000, false, 0, vec![2]);
+        let p3 = Packet::new(3000, 2, 1000, false, 0, vec![3]);
+
+        scheduler.push(p1);
+        scheduler.push(p2);
+        scheduler.push(p3);
+
+        assert!(scheduler.can_pop());
+
+        // Min-heap must emit PTS=1000 first, then PTS=2000, then PTS=3000
+        let out1 = scheduler.pop().unwrap();
+        assert_eq!(out1.pts(), 1000);
+
+        let out2 = scheduler.pop().unwrap();
+        assert_eq!(out2.pts(), 2000);
+
+        let out3 = scheduler.pop().unwrap();
+        assert_eq!(out3.pts(), 3000);
+
+        assert!(scheduler.is_empty());
+    }
+}
+
