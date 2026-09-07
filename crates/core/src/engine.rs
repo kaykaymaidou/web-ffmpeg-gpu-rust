@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 use crate::demuxer::mp4::{Mp4Demuxer, RustDemuxedTrack};
 use crate::bitstream::h264::{build_avcc, parse_sps, split_annex_b, NalUnitType};
+use crate::muxer::mp4::{RustMp4Muxer, VideoTrackConfig, AudioTrackConfig};
 use crate::timeline::TimelineQueue;
 use crate::packet::Packet;
 
@@ -163,4 +164,51 @@ pub fn create_rust_packet(
     data: Vec<u8>,
 ) -> Packet {
     Packet::new(pts, dts, duration, is_keyframe, stream_index, data)
+}
+
+/// WASM-exported MP4 Muxer with FastStart streaming support.
+#[wasm_bindgen]
+pub struct RustWasmMp4Muxer {
+    inner: RustMp4Muxer,
+}
+
+#[wasm_bindgen]
+impl RustWasmMp4Muxer {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: RustMp4Muxer::new(),
+        }
+    }
+
+    pub fn set_video_track(&mut self, width: u32, height: u32, timescale: u32, sps: Vec<u8>, pps: Vec<u8>) {
+        self.inner.set_video_track(VideoTrackConfig {
+            width,
+            height,
+            timescale,
+            sps,
+            pps,
+        });
+    }
+
+    pub fn set_audio_track(&mut self, timescale: u32, sample_rate: u32, channels: u16, config: Option<Vec<u8>>) {
+        self.inner.set_audio_track(AudioTrackConfig {
+            timescale,
+            sample_rate,
+            channels,
+            config,
+        });
+    }
+
+    pub fn write_video_sample(&mut self, data: &[u8], duration_ticks: u32, is_key: bool) {
+        self.inner.write_video_sample(data, duration_ticks, is_key);
+    }
+
+    pub fn write_audio_sample(&mut self, data: &[u8], duration_ticks: u32) {
+        self.inner.write_audio_sample(data, duration_ticks);
+    }
+
+    pub fn finalize(&self) -> Vec<u8> {
+        self.inner.finalize()
+    }
 }
