@@ -52,7 +52,7 @@ pub struct NalUnit<'a> {
 }
 
 /// H.264 Sequence Parameter Set (SPS) parsed metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpsInfo {
     pub profile_idc: u8,
     pub profile_compatibility: u8,
@@ -105,7 +105,8 @@ impl<'a> BitReader<'a> {
         let mut leading_zeros = 0;
         while self.read_bit()? == 0 {
             leading_zeros += 1;
-            if leading_zeros > 32 {
+            // Strictly guard against >= 32 to prevent 1 << 32 bit-shift overflow panic
+            if leading_zeros >= 32 {
                 return None;
             }
         }
@@ -113,7 +114,8 @@ impl<'a> BitReader<'a> {
             return Some(0);
         }
         let suffix = self.read_bits(leading_zeros)?;
-        Some((1 << leading_zeros) - 1 + suffix)
+        let base = (1u32.checked_shl(leading_zeros as u32)?) - 1;
+        base.checked_add(suffix)
     }
 }
 
@@ -190,6 +192,10 @@ pub fn parse_sps(sps_data: &[u8]) -> Option<SpsInfo> {
         }
     }
 
+    if clean_data.len() < 4 {
+        return None;
+    }
+
     let mut reader = BitReader::new(&clean_data[4..]); // Skip NAL header + 3 bytes profile/level
 
     let _sps_id = reader.read_ue()?;
@@ -232,6 +238,9 @@ pub fn parse_sps(sps_data: &[u8]) -> Option<SpsInfo> {
         let _offset_for_non_ref_pic = reader.read_ue()?;
         let _offset_for_top_to_bottom_field = reader.read_ue()?;
         let num_ref_frames_in_pic_order_cnt_cycle = reader.read_ue()?;
+        if num_ref_frames_in_pic_order_cnt_cycle > 255 {
+            return None; // Guard against DoS loop
+        }
         for _ in 0..num_ref_frames_in_pic_order_cnt_cycle {
             let _ = reader.read_ue()?;
         }
@@ -260,9 +269,16 @@ pub fn parse_sps(sps_data: &[u8]) -> Option<SpsInfo> {
         crop_bottom = reader.read_ue().unwrap_or(0);
     }
 
-    let width = ((pic_width_in_mbs_minus1 + 1) * 16) - (crop_left + crop_right) * 2;
-    let height = ((2 - frame_mbs_only_flag) * (pic_height_in_map_units_minus1 + 1) * 16)
-        - (crop_top + crop_bottom) * 2;
+    // Safe arithmetic preventing addition overflow and subtraction underflow
+    let raw_width = pic_width_in_mbs_minus1.checked_add(1)?.checked_mul(16)?;
+    let crop_w = (crop_left.checked_add(crop_right)?).checked_mul(2)?;
+    let width = raw_width.checked_sub(crop_w)?;
+
+    let raw_height = (2 - frame_mbs_only_flag)
+        .checked_mul(pic_height_in_map_units_minus1.checked_add(1)?)?
+        .checked_mul(16)?;
+    let crop_h = (crop_top.checked_add(crop_bottom)?).checked_mul(2)?;
+    let height = raw_height.checked_sub(crop_h)?;
 
     Some(SpsInfo {
         profile_idc,
@@ -342,6 +358,25 @@ mod tests {
         assert_eq!(avcc[1], 0x64); // profile
         assert_eq!(avcc[3], 0x28); // level
         assert_eq!(avcc[5] & 0x1f, 1); // 1 SPS
+    }
+
+    #[test]
+    fn test_exp_golomb_32_zero_shift_overflow() {
+        // 32 zero bits followed by 1 bit and 32 suffix bits
+        let mut data = vec![0u8; 4]; // 32 zero bits
+        data.push(0x80); // 1-bit set at bit 33
+        data.extend_from_slice(&[0xff; 4]); // suffix
+
+        let mut reader = BitReader::new(&data);
+        // Must return None rather than panicking with 'attempt to shift left with overflow'
+        assert_eq!(reader.read_ue(), None);
+    }
+
+    #[test]
+    fn test_malformed_sps_underflow_resilience() {
+        // Truncated data after stripping
+        let malformed = vec![0x67, 0x00, 0x00, 0x03];
+        assert_eq!(parse_sps(&malformed), None);
     }
 }
 

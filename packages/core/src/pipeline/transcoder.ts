@@ -56,6 +56,18 @@ export class WebFfmpegTranscoder {
       throw new Error('No valid video track found in MP4 container.');
     }
 
+    // FAIL-01 Autocorrection: Dirty leading non-IDR frame dropper
+    // If the stream was cut or joined midway, leading delta frames cause green screens or decode errors.
+    // Drop leading delta frames until the first key frame is encountered.
+    const firstKeyIndex = videoTrack.samples.findIndex((s) => s.type === 'key');
+    if (firstKeyIndex > 0) {
+      console.warn(`[Autocorrection FAIL-01] Dropped ${firstKeyIndex} leading dirty non-IDR frames before first keyframe.`);
+      videoTrack.samples = videoTrack.samples.slice(firstKeyIndex);
+    } else if (firstKeyIndex === -1 && videoTrack.samples.length > 0) {
+      console.warn(`[Autocorrection FAIL-01] No keyframe marked; forcing first frame as keyframe for recovery.`);
+      videoTrack.samples[0].type = 'key';
+    }
+
     const audioTrack = tracks.find((t) => t.codec.startsWith('mp4a'));
 
     // 2. Resolve preset target dimensions and bitrate
@@ -72,19 +84,29 @@ export class WebFfmpegTranscoder {
     let sps = new Uint8Array([0x67, 0x42, 0xc0, 0x1e, 0xd9, 0x00, 0xa0, 0x7b, 0x40]);
     let pps = new Uint8Array([0x68, 0xce, 0x38, 0x80]);
 
+    // FAIL-02 Autocorrection: Safe SPS parsing with exception isolation
     if (videoTrack.description && videoTrack.description.byteLength > 10) {
-      // Extract SPS/PPS from avcC if present
-      const avcc = videoTrack.description;
-      const numSps = avcc[5] & 0x1f;
-      if (numSps > 0) {
-        const spsLen = (avcc[6] << 8) | avcc[7];
-        sps = avcc.slice(8, 8 + spsLen);
-        const ppsOffset = 8 + spsLen;
-        const numPps = avcc[ppsOffset];
-        if (numPps > 0) {
-          const ppsLen = (avcc[ppsOffset + 1] << 8) | avcc[ppsOffset + 2];
-          pps = avcc.slice(ppsOffset + 3, ppsOffset + 3 + ppsLen);
+      try {
+        const avcc = videoTrack.description;
+        const numSps = avcc[5] & 0x1f;
+        if (numSps > 0) {
+          const spsLen = (avcc[6] << 8) | avcc[7];
+          if (8 + spsLen <= avcc.byteLength) {
+            sps = avcc.slice(8, 8 + spsLen);
+            const ppsOffset = 8 + spsLen;
+            if (ppsOffset < avcc.byteLength) {
+              const numPps = avcc[ppsOffset];
+              if (numPps > 0 && ppsOffset + 3 <= avcc.byteLength) {
+                const ppsLen = (avcc[ppsOffset + 1] << 8) | avcc[ppsOffset + 2];
+                if (ppsOffset + 3 + ppsLen <= avcc.byteLength) {
+                  pps = avcc.slice(ppsOffset + 3, ppsOffset + 3 + ppsLen);
+                }
+              }
+            }
+          }
         }
+      } catch (err) {
+        console.warn('[Autocorrection FAIL-02] Corrupted avcC description detected; safely defaulting to baseline SPS/PPS.', err);
       }
     }
 
@@ -96,18 +118,32 @@ export class WebFfmpegTranscoder {
       pps,
     });
 
+    // FAIL-04 Autocorrection: Audio Fault Isolation
+    // If audio track is corrupted or empty, safely isolate audio and do not abort video transcoding
     if (audioTrack && !options.muteAudio) {
-      muxer.setAudioTrack({
-        timescale: audioTrack.timescale || 44100,
-        sampleRate: audioTrack.timescale || 44100,
-        channels: 2,
-        config: audioTrack.description,
-      });
+      try {
+        muxer.setAudioTrack({
+          timescale: audioTrack.timescale || 44100,
+          sampleRate: audioTrack.timescale || 44100,
+          channels: 2,
+          config: audioTrack.description,
+        });
 
-      // Pass-through AAC packets directly into muxer
-      for (const sample of audioTrack.samples) {
-        const durationTicks = Math.max(1, Math.round((sample.duration * (audioTrack.timescale || 44100)) / 1_000_000));
-        muxer.writeAudioSample(sample.data, durationTicks);
+        let audioCorruptCount = 0;
+        for (const sample of audioTrack.samples) {
+          if (!sample.data || sample.data.byteLength === 0) {
+            audioCorruptCount++;
+            continue; // Skip corrupted empty audio packet
+          }
+          const durationTicks = Math.max(1, Math.round((sample.duration * (audioTrack.timescale || 44100)) / 1_000_000));
+          muxer.writeAudioSample(sample.data, durationTicks);
+        }
+
+        if (audioCorruptCount > 0) {
+          console.warn(`[Autocorrection FAIL-04] Skipped ${audioCorruptCount} corrupted audio packets; video continues unaffected.`);
+        }
+      } catch (audioErr) {
+        console.warn(`[Autocorrection FAIL-04] Audio track initialization failed; automatically degrading to mute video export.`, audioErr);
       }
     }
 
@@ -170,33 +206,32 @@ export class WebFfmpegTranscoder {
     let lastReportTime = startTime;
     let framesSinceLastReport = 0;
 
-    const decoder = new HardwareVideoDecoder(async (frame, _meta) => {
+    const decoder = new HardwareVideoDecoder((frame, _meta) => {
       processedFrames++;
       framesSinceLastReport++;
-
-      // Apply Backpressure: wait if encoder queue size is high
-      await encoder.waitForBackpressure(8);
 
       let frameToEncode = frame;
       let intermediateFrame: VideoFrame | null = null;
 
-      if (needsResize && offscreenCanvas && offscreenCtx) {
-        offscreenCtx.drawImage(frame, 0, 0, targetWidth, targetHeight);
-        intermediateFrame = new VideoFrame(offscreenCanvas, {
-          timestamp: frame.timestamp,
-          duration: frame.duration || 33333,
-        });
-        frameToEncode = intermediateFrame;
-      }
+      try {
+        if (needsResize && offscreenCanvas && offscreenCtx) {
+          offscreenCtx.drawImage(frame, 0, 0, targetWidth, targetHeight);
+          intermediateFrame = new VideoFrame(offscreenCanvas, {
+            timestamp: frame.timestamp,
+            duration: frame.duration || 33333,
+          });
+          frameToEncode = intermediateFrame;
+        }
 
-      const isKeyframeInterval = processedFrames % 60 === 1;
-      encoder.encode(frameToEncode, { keyFrame: isKeyframeInterval });
-
-      // Invariant 1: ALWAYS close frames synchronously to prevent VRAM leaks!
-      if (intermediateFrame) {
-        intermediateFrame.close();
+        const isKeyframeInterval = processedFrames % 60 === 1;
+        encoder.encode(frameToEncode, { keyFrame: isKeyframeInterval });
+      } finally {
+        // Invariant 1: Synchronous RAII closure on all paths
+        if (intermediateFrame) {
+          try { intermediateFrame.close(); } catch {}
+        }
+        try { frame.close(); } catch {}
       }
-      frame.close();
 
       // Progress reporting
       const now = performance.now();
@@ -221,22 +256,53 @@ export class WebFfmpegTranscoder {
       }
     });
 
-    const isSupported = await decoder.configure({
-      codec: videoTrack.codec,
-      description: videoTrack.description,
-    });
+    let isSupported = false;
+    try {
+      isSupported = await decoder.configure({
+        codec: videoTrack.codec,
+        description: videoTrack.description,
+      });
+    } catch {
+      // Handled in fallback below
+    }
+
+    if (!isSupported) {
+      console.warn(`[Autocorrection FAIL-02] Codec ${videoTrack.codec} unsupported; attempting fallback to avc1.42001f baseline.`);
+      try {
+        isSupported = await decoder.configure({ codec: 'avc1.42001f' });
+      } catch {}
+    }
 
     if (!isSupported) {
       throw new Error(`VideoDecoder does not support input codec: ${videoTrack.codec}`);
     }
 
-    // Feed samples to decoder
+    // Feed samples to decoder with dual backpressure (FAIL-06) and monotonic PTS clamping (FAIL-03)
+    let lastSanitizedPts = -1;
+    const initialOffset = videoTrack.samples[0]?.timestamp || 0;
+
     for (let i = 0; i < totalFrames; i++) {
+      while (decoder.getQueueSize() >= 4 || encoder.encodeQueueSize >= 8) {
+        await new Promise((resolve) => setTimeout(resolve, 4));
+      }
+
       const sample = videoTrack.samples[i];
+      let pts = sample.timestamp;
+      if (initialOffset > 0) {
+        pts = pts - initialOffset;
+      }
+      if (pts < 0) {
+        pts = 0;
+      }
+      if (lastSanitizedPts >= 0 && pts <= lastSanitizedPts) {
+        pts = lastSanitizedPts + Math.max(1000, sample.duration || 33333);
+      }
+      lastSanitizedPts = pts;
+
       const chunk = new EncodedVideoChunk({
         type: sample.type,
-        timestamp: sample.timestamp,
-        duration: sample.duration,
+        timestamp: pts,
+        duration: sample.duration || 33333,
         data: sample.data,
       });
       decoder.decodeChunk(chunk);

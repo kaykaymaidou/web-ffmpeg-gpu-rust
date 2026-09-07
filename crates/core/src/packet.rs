@@ -74,4 +74,14 @@ impl Packet {
     pub fn size(&self) -> usize {
         self.data.len()
     }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_pts(&mut self, pts: i64) {
+        self.pts = pts;
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_dts(&mut self, dts: i64) {
+        self.dts = dts;
+    }
 }

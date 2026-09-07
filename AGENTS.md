@@ -19,3 +19,9 @@ This project develops a high-performance web multimedia engine powered by **pure
 - Do NOT jump into massive feature implementations without an aligned RFC under `docs/rfcs/`.
 - Every feature must be validated against real-world sample cases (B-frames, variable framerates, rotated videos, audio sync).
 - Visual telemetry and playground verification (`apps/playground`) must accompany all major releases.
+
+## 5. Industrial-Grade "Three-Zeros" Verification Invariant
+- **Zero Panic**: Pure Rust parser must handle all corrupted bitstreams, malformed SPS/PPS, and truncated NALs without `panic!`.
+- **Zero VRAM Leak**: 1,000 continuous frames of decoding, WebGPU shader filtering, or encoding must have net VRAM growth < 5MB and zero unclosed `VideoFrame` handles.
+- **Zero Desync Drift**: Audio/Video playback and transcoding must maintain hardware clock synchronization within `|diff| < 40ms`.
+- **Multi-Agent Execution Authorization**: The agent is authorized to proactively generate synthetic fuzzing bitstreams, spawn concurrent subagents, and execute end-to-end stress testing.

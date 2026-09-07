@@ -43,6 +43,14 @@ export class SimpleMp4Demuxer {
       offset += boxSize;
     }
 
+    // FAIL-05 Autocorrection: if no moov box found (truncated file), activate salvage mode
+    if (tracks.length === 0) {
+      const salvaged = this.salvageTruncatedMdat();
+      if (salvaged) {
+        tracks.push(salvaged);
+      }
+    }
+
     return tracks;
   }
 
@@ -261,5 +269,75 @@ export class SimpleMp4Demuxer {
       result += String.fromCharCode(this.view.getUint8(start + i));
     }
     return result;
+  }
+
+  /**
+   * FAIL-05 Autocorrection: Scans truncated MP4 / raw bitstream without 'moov' box
+   * to salvage playable NAL slices from mdat.
+   */
+  private salvageTruncatedMdat(): DemuxedTrack | null {
+    let mdatStart = 0;
+    for (let i = 0; i <= this.view.byteLength - 8; i++) {
+      if (this.getString(i + 4, 4) === 'mdat') {
+        mdatStart = i + 8;
+        break;
+      }
+    }
+
+    const u8 = new Uint8Array(this.buffer, mdatStart);
+    const samples: DemuxedSample[] = [];
+    const len = u8.byteLength;
+    let i = 0;
+
+    const nals: Array<{ start: number; isKey: boolean }> = [];
+    while (i + 3 < len) {
+      if (u8[i] === 0 && u8[i + 1] === 0) {
+        let prefixLen = 0;
+        if (u8[i + 2] === 1) {
+          prefixLen = 3;
+        } else if (i + 4 < len && u8[i + 2] === 0 && u8[i + 3] === 1) {
+          prefixLen = 4;
+        }
+
+        if (prefixLen > 0) {
+          const nalType = u8[i + prefixLen] & 0x1f;
+          const isKey = nalType === 5 || nalType === 7;
+          nals.push({ start: i, isKey });
+          i += prefixLen;
+          continue;
+        }
+      }
+      i++;
+    }
+
+    let frameIndex = 0;
+    for (let k = 0; k < nals.length; k++) {
+      const start = nals[k].start;
+      const end = k + 1 < nals.length ? nals[k + 1].start : len;
+      if (end > start + 4) {
+        const nalData = u8.slice(start, end);
+        samples.push({
+          type: nals[k].isKey ? 'key' : 'delta',
+          timestamp: frameIndex * 33333,
+          duration: 33333,
+          data: nalData,
+        });
+        frameIndex++;
+      }
+    }
+
+    if (samples.length > 0) {
+      console.warn(`[Autocorrection FAIL-05] Salvaged ${samples.length} frames from truncated MP4 without moov box.`);
+      return {
+        id: 1,
+        codec: 'avc1.42001f',
+        width: 1280,
+        height: 720,
+        timescale: 30000,
+        samples,
+      };
+    }
+
+    return null;
   }
 }
