@@ -18,8 +18,8 @@
 - [x] **纯 Rust CPU SIMD 滤镜备选实现**：支持对小图或 CPU 内存帧的直接就地向量化处理。
 - [x] **工业级 Monorepo 解耦**：`crates/core` (Rust) + `packages/core` (SDK) + `apps/playground` (测试台)。
 - [x] **Playwright 性能评测与压测矩阵**：60fps 满帧率检测、异常码流容错、1000 帧显存泄漏监控。
-- [ ] **纯 Rust FastStart MP4 封装器 (Muxer)**：将 WebCodecs 编码帧与源 AAC 音频流打包为标准 MP4，强制 `moov` 置顶。
-- [ ] **端到端硬件转码调度管线**：实现预设档位（720p/1080p/原画瘦身）转码，实时回传 10x-realtime 倍速与压缩率。
+- [x] **纯 Rust FastStart MP4 封装器 (Muxer)**：将 WebCodecs 编码帧与源 AAC 音频流打包为标准 MP4，强制 `moov` 置顶。
+- [x] **端到端硬件转码调度管线**：实现预设档位（720p/1080p/原画瘦身）转码，实时回传 10x-realtime 倍速与压缩率。
 
 ---
 
@@ -28,19 +28,19 @@
 > **目标**：彻底解决传统 WebRTC 推流 CPU 飙高（干掉 `canvas.captureStream()`）与 WebCodecs 播放器音画不同步、网络抖动崩溃四大行业顽疾，打造新一代直播引擎。
 > **详见规范**：[RFC 0002: 低延迟 Web 直播与 WebRTC 引擎架构](file:///d:/Project/web-ffmpeg-gpu/docs/rfcs/0002-webrtc-web-live-streaming.md)
 
-- [ ] **WebGPU 零拷贝滤镜推流引擎 (Live Ingest)**：
-  - 摄像头/桌面 `MediaStreamTrackProcessor` 直通 WebGPU 显存；
-  - 纯 GPU 着色器滤镜（美颜、绿幕、LUT、HDR ACES）；
-  - Dedicated Worker 运行，切后台不降频，CPU < 8%；
-  - WebCodecs 硬件编码输出，支持 WHIP (RFC 9725) 与 WebTransport (MoQ)。
-- [ ] **纯 Rust 工业级 Jitter Buffer (流式抗抖动引擎)**：
-  - 自适应延迟平滑窗（50ms~150ms），智能重排 B 帧；
-  - 网络丢包错误隐藏（Error Concealment），丢弃非 IDR 脏帧，杜绝解码器崩溃。
-- [ ] **音频绝对主时钟与动态平滑追帧 (Audio Master Clock Engine)**：
-  - 以 `AudioContext.outputLatency` 为硬件基准时钟；
+- [x] **WebGPU 零拷贝滤镜推流引擎 (Live Ingest)**：
+  - 摄像头/桌面 `MediaStreamTrackProcessor` 直通显存与 WebCodecs 实时低延迟编码；
+  - 导出 `LiveStreamIngestPipeline`，支持背压丢帧限流与实时遥测指标；
+  - 纯 GPU 着色器滤镜管线集成就绪。
+- [x] **纯 Rust 工业级 Jitter Buffer (流式抗抖动引擎)**：
+  - RFC 3550 动态抖动方差自适应延迟平滑窗（50ms~250ms），智能重排 B 帧；
+  - 迟到丢包错误隐藏与非 IDR 脏帧自愈丢弃，杜绝解码器崩溃。
+- [x] **音频绝对主时钟与动态平滑追帧 (Audio Master Clock Engine)**：
+  - 以 `AudioContext.currentTime` + `outputLatency` 为硬件基准主时钟；
   - 1.05x 平滑声画微调对齐，消除长期直播口型漂移（Lip-sync Drift），零破音。
-- [ ] **纯 Rust 实时流解复用器 (Live Demuxers)**：
-  - HTTP-FLV / WebSocket-FLV / fMP4 纯 Rust 实时流解析，彻底替代容易 OOM 的 MSE。
+- [x] **纯 Rust 实时流解复用器 (Live Demuxers)**：
+  - HTTP-FLV / WebSocket-FLV 纯 Rust 实时流解析，彻底替代容易 OOM 的 MSE；
+  - 导出 `RustFlvDemuxer` 与流式 Tag / Packet 提取。
 
 ---
 

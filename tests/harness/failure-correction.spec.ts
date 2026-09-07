@@ -4,6 +4,8 @@ import {
   FastStartMp4Muxer,
   WebFfmpegTranscoder,
   MasterClockSync,
+  LiveStreamPlayer,
+  LiveStreamIngestPipeline,
 } from '@web-ffmpeg-gpu/core';
 import { BitstreamFuzzer } from './fuzzer';
 
@@ -277,5 +279,33 @@ test.describe('Industrial Failure Cases & Self-Correction Autopilot Matrix (FAIL
     // 4. Catastrophic drift (> 500ms lag): must trigger SEEK_KEYFRAME
     const decisionSeek = clock.evaluateFrameSync(normalClockUs - 650000); // -650ms drift
     expect(decisionSeek.action).toBe('SEEK_KEYFRAME');
+  });
+
+  test('RFC 0002 Live Player Pipeline: lifecycle management and metrics querying', async () => {
+    const player = new LiveStreamPlayer({
+      minBufferMs: 50,
+      maxBufferMs: 200,
+    });
+
+    expect(player.active).toBe(false);
+    const metricsInit = player.getMetrics();
+    expect(metricsInit.renderedFrames).toBe(0);
+    expect(metricsInit.droppedFrames).toBe(0);
+
+    await player.reset();
+    expect(player.active).toBe(false);
+  });
+
+  test('RFC 0002 Live Ingest Pipeline: state tracking and telemetry estimation', async () => {
+    const pipeline = new LiveStreamIngestPipeline();
+
+    expect(pipeline.active).toBe(false);
+    const telemetry = pipeline.getTelemetry();
+    expect(telemetry.encodedFrames).toBe(0);
+    expect(telemetry.currentFps).toBe(0);
+    expect(telemetry.droppedFrames).toBe(0);
+
+    await pipeline.stop();
+    expect(pipeline.active).toBe(false);
   });
 });
