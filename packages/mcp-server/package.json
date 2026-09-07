@@ -1,0 +1,21 @@
+{
+  "name": "@web-ffmpeg-gpu/mcp-server",
+  "version": "0.1.0",
+  "description": "Model Context Protocol (MCP) Server exposing Web-FFmpeg-GPU capabilities to AI Agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "web-ffmpeg-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@web-ffmpeg-gpu/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

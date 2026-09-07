@@ -11,10 +11,12 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/playground",
     "build:core": "npm run build --workspace=packages/core",
+    "build:mcp": "npm run build --workspace=packages/mcp-server",
     "build:playground": "npm run build --workspace=apps/playground",
     "build:wasm": "cargo build --workspace --target wasm32-unknown-unknown --release",
     "check:rust": "cargo check --workspace --target wasm32-unknown-unknown",
-    "build": "npm run build:core && npm run build:playground",
+    "build": "npm run build:core && npm run build:mcp && npm run build:playground",
+    "mcp": "node packages/mcp-server/dist/index.js",
     "test:e2e": "playwright test",
     "preview": "npm run preview --workspace=apps/playground"
   },
@@ -31,6 +33,7 @@
   "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.50.0",
+    "@types/node": "^26.5.0",
     "@webgpu/types": "^0.1.72",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"

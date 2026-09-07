@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "web-ffmpeg-gpu": {
+      "command": "node",
+      "args": ["./packages/mcp-server/dist/index.js"],
+      "description": "Next-Gen Web-FFmpeg-GPU Autonomous Multimedia Agent (FastStart Transcoder, Bitstream Prober, Stream Salvager)"
+    }
+  }
+}
