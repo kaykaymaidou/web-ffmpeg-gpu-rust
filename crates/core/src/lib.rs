@@ -1,11 +1,13 @@
 pub mod bitstream;
 pub mod demuxer;
 pub mod engine;
+pub mod filter;
 pub mod frame;
 pub mod packet;
 pub mod timeline;
 
 pub use engine::{create_rust_packet, create_rust_timeline, RustDemuxer, RustStreamAnalyzer};
+pub use filter::RustCpuFilter;
 pub use frame::{ColorSpace, FrameMetadata, PixelFormat};
 pub use packet::Packet;
 pub use timeline::TimelineQueue;
