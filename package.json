@@ -1,0 +1,28 @@
+{
+  "name": "web-ffmpeg-gpu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next-Gen Web-FFmpeg with WebGPU Shader Pipelines & WebCodecs Hardware Acceleration",
+  "type": "module",
+  "scripts": {
+    "dev": "vite web",
+    "build": "tsc && vite build web",
+    "preview": "vite preview web"
+  },
+  "keywords": [
+    "ffmpeg",
+    "webgpu",
+    "webcodecs",
+    "wasm",
+    "rust",
+    "video-processing",
+    "hardware-acceleration"
+  ],
+  "author": "Web-FFmpeg-GPU Contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "@webgpu/types": "^0.1.72",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

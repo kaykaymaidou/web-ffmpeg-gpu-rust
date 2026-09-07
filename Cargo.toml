@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/filter-webgpu",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Web-FFmpeg-GPU Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/web-ffmpeg-gpu/web-ffmpeg-gpu"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
