@@ -74,6 +74,61 @@
           </div>
         </div>
 
+        <!-- GPU Hardware Transcoder Card (RFC 0001) -->
+        <div class="card transcode-card">
+          <div class="card-title">
+            <span>⚡ GPU 极速转码压缩 (FastStart MP4)</span>
+          </div>
+          <label class="stat-title" style="display: block; margin-bottom: 4px;">目标预设档位:</label>
+          <select id="select-preset" class="select-input">
+            <option value="social-720p">📱 社交分享 (720p @ 2.5 Mbps)</option>
+            <option value="hd-1080p" selected>🎬 高清网盘 (1080p @ 5.0 Mbps)</option>
+            <option value="original-slim">💎 原画瘦身 (保留原分辨率 @ 8.0 Mbps)</option>
+          </select>
+
+          <div class="checkbox-group">
+            <input type="checkbox" id="check-mute" />
+            <label for="check-mute">静音导出 (移除音频轨道)</label>
+          </div>
+
+          <button class="btn btn-primary btn-block" id="btn-start-transcode" disabled>⚡ 开始 GPU 硬件高速转码</button>
+
+          <!-- Progress Bar & Stats -->
+          <div id="transcode-progress-section" style="display: none; margin-top: 12px;">
+            <div class="slider-header">
+              <span id="transcode-status-label">转码进行中...</span>
+              <span id="transcode-percent" style="font-weight: bold; color: #34d399;">0%</span>
+            </div>
+            <div class="progress-container">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+
+            <div class="transcode-stats">
+              <div class="stat-item">
+                <span class="stat-title">实时转码速度</span>
+                <span class="stat-val" id="stat-fps">0 FPS (0.0x)</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-title">体积压缩预估</span>
+                <span class="stat-val" id="stat-compression">计算中...</span>
+              </div>
+            </div>
+
+            <button class="btn btn-success btn-block" id="btn-download-mp4" style="display: none; margin-top: 10px;">⬇ 下载 FastStart MP4 文件</button>
+            <video id="transcoded-video-preview" class="dual-view-preview" controls playsinline></video>
+          </div>
+        </div>
+
+        <!-- ISOBMFF Box Tree Inspector Card -->
+        <div class="card inspector-card">
+          <div class="card-title">
+            <span>🔍 纯 Rust 码流与 Box 剖析器</span>
+          </div>
+          <div class="box-tree-view" id="box-tree-content">
+            [尚未加载视频，请先拖入 MP4 文件]
+          </div>
+        </div>
+
         <!-- WebGPU Filter Presets Card -->
         <div class="card filters-card">
           <div class="card-title">

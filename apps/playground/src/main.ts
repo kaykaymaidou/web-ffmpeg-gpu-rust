@@ -1,5 +1,5 @@
-import { WebFfmpegEngine } from '@web-ffmpeg-gpu/core';
-import type { FilterMode, FilterSettings, PlaybackMetrics } from '@web-ffmpeg-gpu/core';
+import { WebFfmpegEngine, WebFfmpegTranscoder, SimpleMp4Demuxer } from '@web-ffmpeg-gpu/core';
+import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -30,8 +30,25 @@ const valContrast = document.getElementById('val-contrast') as HTMLSpanElement;
 const valSaturation = document.getElementById('val-saturation') as HTMLSpanElement;
 const btnResetFilters = document.getElementById('btn-reset-filters') as HTMLButtonElement;
 
+// Transcoding DOM Elements
+const selectPreset = document.getElementById('select-preset') as HTMLSelectElement;
+const checkMute = document.getElementById('check-mute') as HTMLInputElement;
+const btnStartTranscode = document.getElementById('btn-start-transcode') as HTMLButtonElement;
+const transcodeProgressSection = document.getElementById('transcode-progress-section') as HTMLDivElement;
+const transcodeStatusLabel = document.getElementById('transcode-status-label') as HTMLSpanElement;
+const transcodePercent = document.getElementById('transcode-percent') as HTMLSpanElement;
+const progressFill = document.getElementById('progress-fill') as HTMLDivElement;
+const statFps = document.getElementById('stat-fps') as HTMLSpanElement;
+const statCompression = document.getElementById('stat-compression') as HTMLSpanElement;
+const btnDownloadMp4 = document.getElementById('btn-download-mp4') as HTMLButtonElement;
+const transcodedVideoPreview = document.getElementById('transcoded-video-preview') as HTMLVideoElement;
+const boxTreeContent = document.getElementById('box-tree-content') as HTMLDivElement;
+
 // State
 let engine: WebFfmpegEngine | null = null;
+let currentFileBuffer: ArrayBuffer | null = null;
+let currentFileName: string = '';
+let lastTranscodeResult: TranscodeResult | null = null;
 let currentFilterSettings: FilterSettings = {
   mode: 'none',
   brightness: 0.0,
@@ -40,6 +57,8 @@ let currentFilterSettings: FilterSettings = {
 };
 
 async function init() {
+  setupEventListeners();
+
   const hasWebCodecs = typeof VideoDecoder !== 'undefined';
   if (hasWebCodecs) {
     webcodecsBadge.textContent = 'WebCodecs: 硬件就绪';
@@ -69,13 +88,10 @@ async function init() {
     gpuStatusBadge.textContent = 'WebGPU: 硬件加速已激活';
     gpuStatusBadge.className = 'badge badge-success';
   } catch (err: any) {
-    console.error('WebGPU Init Failed:', err);
+    console.warn('WebGPU Init Failed:', err);
     gpuStatusBadge.textContent = 'WebGPU: 不受支持 / 未开启';
     gpuStatusBadge.className = 'badge';
-    alert(`初始化 WebGPU 失败: ${err.message || err}`);
   }
-
-  setupEventListeners();
 }
 
 function setupEventListeners() {
@@ -121,23 +137,29 @@ function setupEventListeners() {
     });
   });
 
-  sliderBrightness.addEventListener('input', () => {
+  const onBrightness = () => {
     currentFilterSettings.brightness = parseFloat(sliderBrightness.value);
     valBrightness.textContent = sliderBrightness.value;
     applyFilters();
-  });
+  };
+  sliderBrightness.addEventListener('input', onBrightness);
+  sliderBrightness.addEventListener('change', onBrightness);
 
-  sliderContrast.addEventListener('input', () => {
+  const onContrast = () => {
     currentFilterSettings.contrast = parseFloat(sliderContrast.value);
     valContrast.textContent = sliderContrast.value;
     applyFilters();
-  });
+  };
+  sliderContrast.addEventListener('input', onContrast);
+  sliderContrast.addEventListener('change', onContrast);
 
-  sliderSaturation.addEventListener('input', () => {
+  const onSaturation = () => {
     currentFilterSettings.saturation = parseFloat(sliderSaturation.value);
     valSaturation.textContent = sliderSaturation.value;
     applyFilters();
-  });
+  };
+  sliderSaturation.addEventListener('input', onSaturation);
+  sliderSaturation.addEventListener('change', onSaturation);
 
   btnResetFilters.addEventListener('click', () => {
     currentFilterSettings = {
@@ -156,32 +178,127 @@ function setupEventListeners() {
     filterChips[0].classList.add('active');
     applyFilters();
   });
-}
 
-function applyFilters() {
-  if (engine) {
-    engine.setFilters(currentFilterSettings);
+    btnStartTranscode.addEventListener('click', async () => {
+      if (!currentFileBuffer) return;
+      await startTranscoding();
+    });
+
+    btnDownloadMp4.addEventListener('click', () => {
+      if (!lastTranscodeResult) return;
+      const blob = new Blob([lastTranscodeResult.mp4Buffer as any], { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gpu_transcoded_faststart_${currentFileName || 'output.mp4'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
   }
-}
 
-async function loadFile(file: File) {
-  if (!engine) return;
-  try {
-    trackInfo.textContent = `解析容器与流信息: ${file.name}...`;
-    const buffer = await file.arrayBuffer();
-    const info = await engine.loadMedia(buffer);
-
-    trackInfo.textContent = `${file.name} | ${info.codec} | ${info.width}x${info.height} | ~${info.fps} fps`;
-    emptyState.style.display = 'none';
-    btnPlayPause.disabled = false;
-    btnPlayPause.textContent = '⏸ 暂停';
-
-    engine.play();
-  } catch (err: any) {
-    console.error('Failed to load media:', err);
-    alert(`加载或解复用视频失败: ${err.message || err}`);
-    trackInfo.textContent = `加载失败: ${err.message || err}`;
+  function applyFilters() {
+    if (engine) {
+      engine.setFilters(currentFilterSettings);
+    }
   }
-}
 
-init();
+  async function loadFile(file: File) {
+    if (!engine) return;
+    try {
+      trackInfo.textContent = `解析容器与流信息: ${file.name}...`;
+      const buffer = await file.arrayBuffer();
+      currentFileBuffer = buffer;
+      currentFileName = file.name;
+
+      const info = await engine.loadMedia(buffer);
+
+      trackInfo.textContent = `${file.name} | ${info.codec} | ${info.width}x${info.height} | ~${info.fps} fps`;
+      emptyState.style.display = 'none';
+      btnPlayPause.disabled = false;
+      btnPlayPause.textContent = '⏸ 暂停';
+      btnStartTranscode.disabled = false;
+
+      // Update Box Tree Inspector
+      try {
+        const demuxer = new SimpleMp4Demuxer(buffer);
+        const tracks = demuxer.parse();
+        let treeText = `📦 Container: ISOBMFF (${(file.size / (1024 * 1024)).toFixed(2)} MB)\n`;
+        tracks.forEach((t) => {
+          const isVid = t.codec.startsWith('avc1') || t.codec.startsWith('hvc1');
+          treeText += `├── 🎞️ Track #${t.id} (${isVid ? 'Video' : 'Audio'}): ${t.codec}\n`;
+          if (isVid) {
+            treeText += `│   ├── 分辨率: ${t.width}x${t.height}\n`;
+            treeText += `│   ├── 样本帧数: ${t.samples.length} frames\n`;
+            treeText += `│   └── 时钟基数: ${t.timescale}\n`;
+          } else {
+            treeText += `│   ├── 时钟基数: ${t.timescale}\n`;
+            treeText += `│   └── 样本包数: ${t.samples.length} packets\n`;
+          }
+        });
+        treeText += `└── ⚡ 导出格式: 纯 Rust FastStart MP4 (moov 置前秒开)`;
+        boxTreeContent.textContent = treeText;
+      } catch (err) {
+        boxTreeContent.textContent = `Box 解析警告: ${err}`;
+      }
+
+      engine.play();
+    } catch (err: any) {
+      console.error('Failed to load media:', err);
+      alert(`加载或解复用视频失败: ${err.message || err}`);
+      trackInfo.textContent = `加载失败: ${err.message || err}`;
+    }
+  }
+
+  async function startTranscoding() {
+    if (!currentFileBuffer) return;
+    try {
+      btnStartTranscode.disabled = true;
+      transcodeProgressSection.style.display = 'block';
+      transcodeStatusLabel.textContent = '⚡ GPU 硬件硬编转码中...';
+      transcodePercent.textContent = '0%';
+      progressFill.style.width = '0%';
+      btnDownloadMp4.style.display = 'none';
+      transcodedVideoPreview.style.display = 'none';
+
+      const preset = selectPreset.value as TranscodePreset;
+      const muteAudio = checkMute.checked;
+
+      const transcoder = new WebFfmpegTranscoder();
+      const result = await transcoder.transcode(currentFileBuffer, {
+        preset,
+        muteAudio,
+        onProgress: (p) => {
+          transcodePercent.textContent = `${p.percent}%`;
+          progressFill.style.width = `${p.percent}%`;
+          statFps.textContent = `${p.fps} FPS (${p.xRealtime}x 实况速)`;
+          const estRatio = Math.max(0, Math.round((1 - p.currentOutputBytes / p.originalSizeBytes) * 100));
+          statCompression.textContent = `预估节省 ~${estRatio}% 体积`;
+        },
+      });
+
+      lastTranscodeResult = result;
+      transcodePercent.textContent = '100%';
+      progressFill.style.width = '100%';
+      transcodeStatusLabel.textContent = `✅ 转码完成! 耗时 ${(result.totalTimeMs / 1000).toFixed(2)}s (平均 ${result.avgFps} FPS, ${result.avgRealtime}x 极速)`;
+
+      const origMb = (result.originalSizeBytes / (1024 * 1024)).toFixed(1);
+      const outMb = (result.outputSizeBytes / (1024 * 1024)).toFixed(1);
+      statCompression.textContent = `${origMb}MB ➔ ${outMb}MB (瘦身 ${Math.round(result.compressionRatio * 100)}%)`;
+
+      // Show download button and preview
+      btnDownloadMp4.style.display = 'block';
+      const blob = new Blob([result.mp4Buffer as any], { type: 'video/mp4' });
+      transcodedVideoPreview.src = URL.createObjectURL(blob);
+      transcodedVideoPreview.style.display = 'block';
+    } catch (err: any) {
+      console.error('Transcode Failed:', err);
+      transcodeStatusLabel.textContent = `❌ 转码失败: ${err.message || err}`;
+      alert(`转码失败: ${err.message || err}`);
+    } finally {
+      btnStartTranscode.disabled = false;
+    }
+  }
+
+  init();
