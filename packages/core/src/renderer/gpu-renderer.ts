@@ -1,5 +1,5 @@
-import type { FilterSettings, FilterMode } from './types';
-import filtersShaderCode from '../shaders/filters.wgsl?raw';
+import type { FilterSettings, FilterMode } from '../types';
+import { FILTERS_WGSL } from '../shaders/filters.wgsl';
 
 const FILTER_MODE_MAP: Record<FilterMode, number> = {
   none: 0,
@@ -38,8 +38,7 @@ export class WebGpuVideoRenderer {
       throw new Error('Failed to find a suitable WebGPU adapter (GPU may be disabled or unsupported).');
     }
 
-    // Capture device name
-    // @ts-ignore - info may be available on modern browsers
+    // @ts-ignore - adapter info in modern browsers
     const info = await this.adapter.requestAdapterInfo?.();
     if (info?.device) {
       this.deviceName = `${info.vendor || ''} ${info.device} (${info.architecture || ''})`.trim();
@@ -57,14 +56,12 @@ export class WebGpuVideoRenderer {
       alphaMode: 'opaque',
     });
 
-    // Create uniform buffer for filter settings
-    // 4 floats / uint32 = 16 bytes aligned
+    // Create 16-byte aligned uniform buffer
     this.uniformBuffer = this.device.createBuffer({
       size: 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // Initial default filter uniforms
     this.updateFilterUniforms({
       mode: 'none',
       brightness: 0.0,
@@ -72,7 +69,6 @@ export class WebGpuVideoRenderer {
       saturation: 1.0,
     });
 
-    // Create linear clamp sampler
     this.sampler = this.device.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
@@ -80,13 +76,11 @@ export class WebGpuVideoRenderer {
       addressModeV: 'clamp-to-edge',
     });
 
-    // Create shader module
     const shaderModule = this.device.createShaderModule({
       label: 'Video Filter WGSL Module',
-      code: filtersShaderCode,
+      code: FILTERS_WGSL,
     });
 
-    // Define bind group layout
     this.bindGroupLayout = this.device.createBindGroupLayout({
       entries: [
         {
@@ -148,7 +142,6 @@ export class WebGpuVideoRenderer {
       return;
     }
 
-    // Zero-copy import of the VideoFrame directly into WebGPU
     const externalTexture = this.device.importExternalTexture({
       source: frame,
     });
@@ -178,7 +171,7 @@ export class WebGpuVideoRenderer {
 
     renderPass.setPipeline(this.pipeline);
     renderPass.setBindGroup(0, bindGroup);
-    renderPass.draw(6); // 2 triangles
+    renderPass.draw(6);
     renderPass.end();
 
     this.device.queue.submit([commandEncoder.finish()]);

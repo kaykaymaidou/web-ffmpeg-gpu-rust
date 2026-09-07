@@ -1,5 +1,5 @@
-import { WebFfmpegPipeline } from './core/pipeline';
-import type { FilterMode, FilterSettings, PlaybackMetrics } from './core/types';
+import { WebFfmpegEngine } from '@web-ffmpeg-gpu/core';
+import type { FilterMode, FilterSettings, PlaybackMetrics } from '@web-ffmpeg-gpu/core';
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -31,7 +31,7 @@ const valSaturation = document.getElementById('val-saturation') as HTMLSpanEleme
 const btnResetFilters = document.getElementById('btn-reset-filters') as HTMLButtonElement;
 
 // State
-let pipeline: WebFfmpegPipeline | null = null;
+let engine: WebFfmpegEngine | null = null;
 let currentFilterSettings: FilterSettings = {
   mode: 'none',
   brightness: 0.0,
@@ -40,7 +40,6 @@ let currentFilterSettings: FilterSettings = {
 };
 
 async function init() {
-  // 1. Detect WebCodecs Support
   const hasWebCodecs = typeof VideoDecoder !== 'undefined';
   if (hasWebCodecs) {
     webcodecsBadge.textContent = 'WebCodecs: 硬件就绪';
@@ -50,14 +49,21 @@ async function init() {
     webcodecsBadge.className = 'badge';
   }
 
-  // 2. Detect & Init WebGPU
   try {
-    pipeline = new WebFfmpegPipeline(canvas);
-    await pipeline.initialize((metrics: PlaybackMetrics) => {
-      metricFps.textContent = `${metrics.currentFps}`;
-      metricLatency.textContent = `${metrics.avgFrameRenderTimeMs} ms`;
-      metricFrames.textContent = `${metrics.totalDecodedFrames}`;
-      metricDevice.textContent = metrics.gpuDeviceName;
+    engine = new WebFfmpegEngine(canvas);
+    await engine.initialize({
+      onMetrics: (metrics: PlaybackMetrics) => {
+        metricFps.textContent = `${metrics.currentFps}`;
+        metricLatency.textContent = `${metrics.avgFrameRenderTimeMs} ms`;
+        metricFrames.textContent = `${metrics.totalDecodedFrames}`;
+        metricDevice.textContent = metrics.gpuDeviceName;
+      },
+      onFallback: (reason, config) => {
+        console.warn(`[Playground Fallback Notice]: ${reason}`, config);
+      },
+      onError: (err) => {
+        console.error(`[Playground Error Notice]:`, err);
+      },
     });
 
     gpuStatusBadge.textContent = 'WebGPU: 硬件加速已激活';
@@ -81,7 +87,6 @@ function setupEventListeners() {
     }
   });
 
-  // Drag & Drop
   dropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
     dropzone.classList.add('dragover');
@@ -99,15 +104,13 @@ function setupEventListeners() {
     }
   });
 
-  // Play / Pause
   btnPlayPause.addEventListener('click', () => {
-    if (!pipeline) return;
-    pipeline.togglePlay();
+    if (!engine) return;
+    engine.togglePlay();
     const isPlaying = btnPlayPause.textContent?.includes('暂停');
     btnPlayPause.textContent = isPlaying ? '▶ 播放' : '⏸ 暂停';
   });
 
-  // Filter Presets
   filterChips.forEach((chip) => {
     chip.addEventListener('click', () => {
       filterChips.forEach((c) => c.classList.remove('active'));
@@ -118,7 +121,6 @@ function setupEventListeners() {
     });
   });
 
-  // Sliders
   sliderBrightness.addEventListener('input', () => {
     currentFilterSettings.brightness = parseFloat(sliderBrightness.value);
     valBrightness.textContent = sliderBrightness.value;
@@ -137,7 +139,6 @@ function setupEventListeners() {
     applyFilters();
   });
 
-  // Reset Filters
   btnResetFilters.addEventListener('click', () => {
     currentFilterSettings = {
       mode: 'none',
@@ -158,25 +159,24 @@ function setupEventListeners() {
 }
 
 function applyFilters() {
-  if (pipeline) {
-    pipeline.setFilters(currentFilterSettings);
+  if (engine) {
+    engine.setFilters(currentFilterSettings);
   }
 }
 
 async function loadFile(file: File) {
-  if (!pipeline) return;
+  if (!engine) return;
   try {
     trackInfo.textContent = `解析容器与流信息: ${file.name}...`;
     const buffer = await file.arrayBuffer();
-    const info = await pipeline.loadMedia(buffer);
+    const info = await engine.loadMedia(buffer);
 
     trackInfo.textContent = `${file.name} | ${info.codec} | ${info.width}x${info.height} | ~${info.fps} fps`;
     emptyState.style.display = 'none';
     btnPlayPause.disabled = false;
     btnPlayPause.textContent = '⏸ 暂停';
 
-    // Auto play
-    pipeline.play();
+    engine.play();
   } catch (err: any) {
     console.error('Failed to load media:', err);
     alert(`加载或解复用视频失败: ${err.message || err}`);
@@ -184,5 +184,4 @@ async function loadFile(file: File) {
   }
 }
 
-// Start
 init();

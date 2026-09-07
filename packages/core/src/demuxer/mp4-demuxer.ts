@@ -1,9 +1,3 @@
-/**
- * Zero-dependency lightweight MP4 Box Demuxer for WebCodecs
- * Parses standard MP4 container structures (ftyp, moov, trak, stbl)
- * to extract codec description, SPS/PPS and EncodedVideoChunks.
- */
-
 export interface DemuxedSample {
   type: 'key' | 'delta';
   timestamp: number; // in microseconds
@@ -74,7 +68,7 @@ export class SimpleMp4Demuxer {
 
   private parseTrak(start: number, end: number): DemuxedTrack | null {
     let offset = start;
-    let codec = 'avc1.640028'; // Default H.264 high profile fallback
+    let codec = 'avc1.640028';
     let width = 1920;
     let height = 1080;
     let timescale = 30000;
@@ -87,7 +81,6 @@ export class SimpleMp4Demuxer {
       if (size === 0) break;
 
       if (type === 'mdia') {
-        // Look inside mdia
         let mdiaOffset = offset + 8;
         while (mdiaOffset < offset + size - 8) {
           const mSize = this.view.getUint32(mdiaOffset);
@@ -98,7 +91,6 @@ export class SimpleMp4Demuxer {
               ? this.view.getUint32(mdiaOffset + 28)
               : this.view.getUint32(mdiaOffset + 20);
           } else if (mType === 'minf') {
-            // Find stbl inside minf
             let minfOffset = mdiaOffset + 8;
             while (minfOffset < mdiaOffset + mSize - 8) {
               const infSize = this.view.getUint32(minfOffset);
@@ -164,7 +156,6 @@ export class SimpleMp4Demuxer {
       if (size === 0) break;
 
       if (type === 'stsd') {
-        // Sample description table: contains avc1 or hvc1
         const entryCount = this.view.getUint32(offset + 12);
         let entryOffset = offset + 16;
         for (let i = 0; i < entryCount; i++) {
@@ -174,7 +165,6 @@ export class SimpleMp4Demuxer {
             trackWidth = this.view.getUint16(entryOffset + 32);
             trackHeight = this.view.getUint16(entryOffset + 34);
 
-            // Search for avcC or hvcC box for configuration record
             let subOffset = entryOffset + 86;
             while (subOffset < entryOffset + entrySize - 8) {
               const subSize = this.view.getUint32(subOffset);
@@ -234,7 +224,6 @@ export class SimpleMp4Demuxer {
       offset += size;
     }
 
-    // Assemble samples
     const samples: DemuxedSample[] = [];
     let currentOffset = chunkOffsets[0] || 0;
     let currentTimestamp = 0;

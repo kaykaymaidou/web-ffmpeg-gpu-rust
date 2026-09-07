@@ -25,3 +25,5 @@ export interface PlaybackMetrics {
 }
 
 export type FrameCallback = (frame: VideoFrame, metadata: { pts: number }) => void;
+export type FallbackCallback = (reason: string, config: VideoDecoderConfig) => void;
+export type ErrorCallback = (error: DOMException | Error) => void;

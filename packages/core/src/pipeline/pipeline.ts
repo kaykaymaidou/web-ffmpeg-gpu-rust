@@ -1,9 +1,9 @@
-import { WebGpuVideoRenderer } from './gpu-renderer';
-import { HardwareVideoDecoder } from './decoder';
-import { SimpleMp4Demuxer, type DemuxedTrack } from './mp4-demuxer';
-import type { FilterSettings, PlaybackMetrics, VideoStreamInfo } from './types';
+import { WebGpuVideoRenderer } from '../renderer/gpu-renderer';
+import { HardwareVideoDecoder } from '../decoder/hardware-decoder';
+import { SimpleMp4Demuxer, type DemuxedTrack } from '../demuxer/mp4-demuxer';
+import type { FilterSettings, PlaybackMetrics, VideoStreamInfo, FallbackCallback, ErrorCallback } from '../types';
 
-export class WebFfmpegPipeline {
+export class WebFfmpegEngine {
   private renderer: WebGpuVideoRenderer;
   private decoder: HardwareVideoDecoder | null = null;
   private canvas: HTMLCanvasElement;
@@ -12,7 +12,7 @@ export class WebFfmpegPipeline {
   private currentSampleIndex: number = 0;
   private animationFrameId: number | null = null;
 
-  // Performance metrics tracking
+  // Telemetry metrics
   private frameCount: number = 0;
   private lastFpsUpdateTime: number = performance.now();
   private currentFps: number = 0;
@@ -21,34 +21,42 @@ export class WebFfmpegPipeline {
   private avgRenderTimeMs: number = 0;
 
   private onMetricsUpdate?: (metrics: PlaybackMetrics) => void;
+  private onFallback?: FallbackCallback;
+  private onError?: ErrorCallback;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.renderer = new WebGpuVideoRenderer(canvas);
   }
 
-  public async initialize(onMetrics?: (metrics: PlaybackMetrics) => void): Promise<void> {
-    this.onMetricsUpdate = onMetrics;
+  public async initialize(options?: {
+    onMetrics?: (metrics: PlaybackMetrics) => void;
+    onFallback?: FallbackCallback;
+    onError?: ErrorCallback;
+  }): Promise<void> {
+    this.onMetricsUpdate = options?.onMetrics;
+    this.onFallback = options?.onFallback;
+    this.onError = options?.onError;
+
     await this.renderer.initialize();
 
-    // Initialize hardware decoder
-    this.decoder = new HardwareVideoDecoder((videoFrame: VideoFrame) => {
-      const renderStart = performance.now();
+    this.decoder = new HardwareVideoDecoder(
+      (videoFrame: VideoFrame) => {
+        const renderStart = performance.now();
+        this.renderer.render(videoFrame);
+        const renderDuration = performance.now() - renderStart;
 
-      // Render via WebGPU
-      this.renderer.render(videoFrame);
+        this.renderTimeAccumulator += renderDuration;
+        this.renderTimeCount++;
+        this.frameCount++;
 
-      // Measure render time
-      const renderDuration = performance.now() - renderStart;
-      this.renderTimeAccumulator += renderDuration;
-      this.renderTimeCount++;
-      this.frameCount++;
-
-      // Free GPU memory immediately! Critical for preventing memory leaks
-      videoFrame.close();
-
-      this.updateMetrics();
-    });
+        // Invariant 1: Close frame immediately after consumption
+        videoFrame.close();
+        this.updateMetrics();
+      },
+      this.onError,
+      this.onFallback
+    );
   }
 
   public async loadMedia(fileBuffer: ArrayBuffer): Promise<VideoStreamInfo> {
@@ -65,11 +73,9 @@ export class WebFfmpegPipeline {
     const videoTrack = tracks[0];
     this.currentTrack = videoTrack;
 
-    // Adjust canvas resolution
     this.canvas.width = videoTrack.width;
     this.canvas.height = videoTrack.height;
 
-    // Configure WebCodecs hardware decoder
     const decoderConfig: VideoDecoderConfig = {
       codec: videoTrack.codec,
       codedWidth: videoTrack.width,
@@ -78,10 +84,10 @@ export class WebFfmpegPipeline {
       hardwareAcceleration: 'prefer-hardware',
     };
 
-    const isSupported = await HardwareVideoDecoder.isSupported(decoderConfig);
-    console.log(`🎬 [WebCodecs] Codec ${videoTrack.codec} hardware support: ${isSupported}`);
-
-    this.decoder?.configure(decoderConfig);
+    const isOk = await this.decoder?.configure(decoderConfig);
+    if (!isOk) {
+      console.warn(`[WebFfmpegEngine] Codec ${videoTrack.codec} not hardware-accelerated. Triggered fallback.`);
+    }
 
     return {
       codec: videoTrack.codec,
@@ -118,15 +124,31 @@ export class WebFfmpegPipeline {
     this.renderer.updateFilterUniforms(settings);
   }
 
+  public seek(sampleIndex: number): void {
+    if (!this.currentTrack) return;
+    this.decoder?.reset();
+    this.currentSampleIndex = Math.max(0, Math.min(sampleIndex, this.currentTrack.samples.length - 1));
+  }
+
+  public getTrack(): DemuxedTrack | null {
+    return this.currentTrack;
+  }
+
+  public getCurrentSampleIndex(): number {
+    return this.currentSampleIndex;
+  }
+
+  public getDecoder(): HardwareVideoDecoder | null {
+    return this.decoder;
+  }
+
   private scheduleNextPlaybackTick(): void {
     if (!this.isPlaying || !this.currentTrack) return;
 
     if (this.currentSampleIndex >= this.currentTrack.samples.length) {
-      // Loop playback
       this.currentSampleIndex = 0;
     }
 
-    // Keep decoder queue filled with 2-3 frames to achieve buttery smooth hardware playback
     while (this.decoder && this.decoder.getQueueSize() < 4 && this.currentSampleIndex < this.currentTrack.samples.length) {
       const sample = this.currentTrack.samples[this.currentSampleIndex++];
       const chunk = new EncodedVideoChunk({
@@ -163,7 +185,7 @@ export class WebFfmpegPipeline {
           currentFps: this.currentFps,
           avgFrameRenderTimeMs: this.avgRenderTimeMs,
           totalDecodedFrames: this.currentSampleIndex,
-          droppedFrames: 0,
+          droppedFrames: this.decoder?.getStats().dropped || 0,
           gpuDeviceName: this.renderer.getDeviceName(),
           isHardwareAccelerated: true,
         });

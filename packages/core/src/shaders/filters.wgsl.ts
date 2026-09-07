@@ -1,5 +1,6 @@
-// WebGPU WGSL Filter Pipeline Shader (High Performance Video Post-Processing)
+// WebGPU WGSL Filter Pipeline Shader (Embedded for zero-dependency bundler compatibility)
 
+export const FILTERS_WGSL = /* wgsl */ `
 struct FilterUniforms {
   filter_mode: u32,    // 0: Pass, 1: Grayscale, 2: Invert, 3: Brightness/Contrast, 4: Sepia, 5: Vignette
   brightness: f32,     // offset [-1.0, 1.0]
@@ -75,3 +76,4 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
   return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 }
+`;

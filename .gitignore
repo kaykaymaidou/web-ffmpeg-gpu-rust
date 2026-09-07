@@ -7,3 +7,6 @@ dist/
 !web/public/wasm/*.wasm
 .env
 .env.local
+.harness/
+test-results/
+playwright-report/

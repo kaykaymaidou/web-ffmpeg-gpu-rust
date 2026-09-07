@@ -1,0 +1,31 @@
+{
+  "name": "@web-ffmpeg-gpu/core",
+  "version": "0.1.0",
+  "description": "Next-Gen Web-FFmpeg Core Engine: WebCodecs Hardware Acceleration + WebGPU Shader Pipelines",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "ffmpeg",
+    "webgpu",
+    "webcodecs",
+    "video-decoder",
+    "hardware-acceleration"
+  ],
+  "author": "Web-FFmpeg-GPU Contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "@webgpu/types": "^0.1.72",
+    "typescript": "^5.7.0"
+  }
+}
