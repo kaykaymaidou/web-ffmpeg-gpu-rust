@@ -4,11 +4,19 @@ import {
   SimpleMp4Demuxer,
   WebGpuComputeEngine,
   LiveLoopbackSession,
+  LiveP2PSender,
+  LiveP2PReceiver,
+  BroadcastChannelSignaling,
+  WebSocketSignaling,
 } from '@web-ffmpeg-gpu/core';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
 (window as any).LiveLoopbackSession = LiveLoopbackSession;
+(window as any).LiveP2PSender = LiveP2PSender;
+(window as any).LiveP2PReceiver = LiveP2PReceiver;
+(window as any).BroadcastChannelSignaling = BroadcastChannelSignaling;
+(window as any).WebSocketSignaling = WebSocketSignaling;
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -66,6 +74,18 @@ const metricRtcPackets = document.getElementById('metric-rtc-packets') as HTMLSp
 const metricRtcRescues = document.getElementById('metric-rtc-rescues') as HTMLSpanElement;
 
 let rtcSession: LiveLoopbackSession | null = null;
+
+// P2P Multi-Peer Direct Streaming Elements
+const selectP2pRole = document.getElementById('select-p2p-role') as HTMLSelectElement;
+const inputP2pRoom = document.getElementById('input-p2p-room') as HTMLInputElement;
+const btnToggleP2p = document.getElementById('btn-toggle-p2p') as HTMLButtonElement;
+const btnP2pPli = document.getElementById('btn-p2p-pli') as HTMLButtonElement;
+const p2pStatusBadge = document.getElementById('p2p-status-badge') as HTMLSpanElement;
+const metricP2pFps = document.getElementById('metric-p2p-fps') as HTMLSpanElement;
+const metricP2pPackets = document.getElementById('metric-p2p-packets') as HTMLSpanElement;
+
+let p2pSender: LiveP2PSender | null = null;
+let p2pReceiver: LiveP2PReceiver | null = null;
 
 // State
 let engine: WebFfmpegEngine | null = null;
@@ -282,6 +302,104 @@ function setupEventListeners() {
         btnToggleRtc.className = 'btn btn-primary';
         btnToggleRtc.disabled = false;
         rtcSession = null;
+      }
+    });
+
+    // P2P Direct Streaming Handlers
+    selectP2pRole.addEventListener('change', () => {
+      const isSender = selectP2pRole.value === 'sender';
+      btnToggleP2p.textContent = isSender ? '▶ 启动 P2P 推流' : '▶ 启动 P2P 接收';
+    });
+
+    btnP2pPli.addEventListener('click', () => {
+      if (p2pReceiver) {
+        p2pReceiver.requestKeyframe();
+      } else if (p2pSender) {
+        p2pSender.requestKeyframe();
+      }
+    });
+
+    btnToggleP2p.addEventListener('click', async () => {
+      if (p2pSender || p2pReceiver) {
+        if (p2pSender) {
+          p2pSender.stop();
+          p2pSender = null;
+        }
+        if (p2pReceiver) {
+          p2pReceiver.stop();
+          p2pReceiver = null;
+        }
+        btnToggleP2p.textContent = selectP2pRole.value === 'sender' ? '▶ 启动 P2P 推流' : '▶ 启动 P2P 接收';
+        btnToggleP2p.className = 'btn btn-primary';
+        btnP2pPli.disabled = true;
+        p2pStatusBadge.textContent = '已断开 (Disconnected)';
+        p2pStatusBadge.style.color = '#cbd5e1';
+        return;
+      }
+
+      const roomId = inputP2pRoom.value.trim() || 'live-room-alpha';
+      const role = selectP2pRole.value;
+      const signaling = new BroadcastChannelSignaling(roomId);
+
+      try {
+        btnToggleP2p.disabled = true;
+        btnToggleP2p.textContent = '连接信令通道中...';
+        emptyState.style.display = 'none';
+
+        if (role === 'sender') {
+          p2pSender = new LiveP2PSender({
+            roomId,
+            signaling,
+            onStateChange: (st) => {
+              p2pStatusBadge.textContent = `P2P 状态: ${st}`;
+              p2pStatusBadge.style.color = st === 'connected' ? '#34d399' : '#f59e0b';
+            },
+            onMetrics: (m) => {
+              metricP2pFps.textContent = `${m.ingestFps} FPS / ${m.bitrateKbps} kbps`;
+              metricP2pPackets.textContent = `${m.rtpPacketsSent} pkts (PLI: ${m.keyframeRequests})`;
+            },
+            onError: (err) => console.error('[LiveP2PSender Error]', err),
+          });
+
+          await p2pSender.start();
+          p2pStatusBadge.textContent = '主播正在推流 (Broadcasting)';
+          p2pStatusBadge.style.color = '#38bdf8';
+          btnToggleP2p.textContent = '⏹ 停止 P2P 推流';
+          btnToggleP2p.className = 'btn btn-danger';
+          btnToggleP2p.disabled = false;
+          btnP2pPli.disabled = false;
+        } else {
+          p2pReceiver = new LiveP2PReceiver({
+            roomId,
+            signaling,
+            renderCanvas: canvas,
+            onStateChange: (st) => {
+              p2pStatusBadge.textContent = `P2P 状态: ${st}`;
+              p2pStatusBadge.style.color = st === 'connected' ? '#34d399' : '#f59e0b';
+            },
+            onMetrics: (m) => {
+              metricP2pFps.textContent = `${m.playoutFps} FPS`;
+              metricP2pPackets.textContent = `${m.rtpPacketsReceived} pkts (丢 ${m.packetsDropped} / 自愈 ${m.fail09Rescues})`;
+            },
+            onError: (err) => console.error('[LiveP2PReceiver Error]', err),
+          });
+
+          await p2pReceiver.start();
+          p2pStatusBadge.textContent = '已就绪，等待主播推流 (Listening)';
+          p2pStatusBadge.style.color = '#a78bfa';
+          btnToggleP2p.textContent = '⏹ 停止 P2P 接收';
+          btnToggleP2p.className = 'btn btn-danger';
+          btnToggleP2p.disabled = false;
+          btnP2pPli.disabled = false;
+        }
+      } catch (err: any) {
+        console.error('Failed to start P2P session:', err);
+        alert(`启动 P2P 会话失败: ${err.message || err}`);
+        btnToggleP2p.textContent = role === 'sender' ? '▶ 启动 P2P 推流' : '▶ 启动 P2P 接收';
+        btnToggleP2p.className = 'btn btn-primary';
+        btnToggleP2p.disabled = false;
+        p2pSender = null;
+        p2pReceiver = null;
       }
     });
   }

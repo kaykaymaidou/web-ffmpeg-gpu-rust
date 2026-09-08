@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: './tests',
   timeout: 45000,
   fullyParallel: false,
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://localhost:3000',

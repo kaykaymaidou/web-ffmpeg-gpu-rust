@@ -3,3 +3,5 @@ export * from './ingest';
 export * from './player';
 export * from './rtp-demuxer';
 export * from './loopback';
+export * from './p2p-signaling';
+export * from './p2p-session';

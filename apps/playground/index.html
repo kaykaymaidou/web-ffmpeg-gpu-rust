@@ -222,6 +222,47 @@
           </div>
         </div>
 
+        <!-- WebRTC P2P Multi-Peer Direct Streaming Cockpit Card -->
+        <div class="card p2p-card">
+          <div class="card-title">
+            <span>🌐 WebRTC P2P 多端直连推拉流舱 (Cross-Tab / Remote)</span>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">角色模式</label>
+              <select id="select-p2p-role" class="form-select" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+                <option value="sender">📡 推流端 (Broadcaster)</option>
+                <option value="receiver">📺 拉流端 (Viewer)</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">房间号 (Room ID)</label>
+              <input type="text" id="input-p2p-room" value="live-room-alpha" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;" />
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button class="btn btn-primary" id="btn-toggle-p2p" style="flex: 1;">▶ 启动 P2P 连接</button>
+            <button class="btn btn-secondary" id="btn-p2p-pli" disabled style="flex: 1;">⚡ 反向 PLI 刷新</button>
+          </div>
+
+          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">
+            连接状态: <span id="p2p-status-badge" style="color: #cbd5e1; font-weight: bold;">未连接 (Idle)</span>
+          </div>
+
+          <div class="transcode-stats" style="margin-top: 6px;">
+            <div class="stat-item">
+              <span class="stat-title">P2P 实时帧率 / 吞吐</span>
+              <span class="stat-val" id="metric-p2p-fps">0 FPS / 0 kbps</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">DataChannel 报文收发</span>
+              <span class="stat-val" id="metric-p2p-packets">0 pkts</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Architecture Principle Card -->
         <div class="card principle-card">
           <div class="card-title">
