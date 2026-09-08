@@ -3,6 +3,7 @@ import { probeToolDefinition, handleProbeMedia } from './tools/probe';
 import { salvageToolDefinition, handleSalvageMp4 } from './tools/salvage';
 import { transcodeToolDefinition, handleTranscodeVideo } from './tools/transcode';
 import { jitterToolDefinition, handleDiagnoseJitter } from './tools/jitter';
+import { rtpToolDefinition, handleDiagnoseRtpStream } from './tools/rtp';
 
 export class McpServer {
   private tools: Map<string, { definition: McpToolDefinition; handler: (args: any) => Promise<McpToolResult> }> = new Map();
@@ -12,6 +13,7 @@ export class McpServer {
     this.registerTool(salvageToolDefinition, handleSalvageMp4);
     this.registerTool(transcodeToolDefinition, handleTranscodeVideo);
     this.registerTool(jitterToolDefinition, handleDiagnoseJitter);
+    this.registerTool(rtpToolDefinition, handleDiagnoseRtpStream);
   }
 
   public registerTool(

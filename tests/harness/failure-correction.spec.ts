@@ -6,6 +6,7 @@ import {
   MasterClockSync,
   LiveStreamPlayer,
   LiveStreamIngestPipeline,
+  RtpStreamDemuxer,
 } from '@web-ffmpeg-gpu/core';
 import { BitstreamFuzzer } from './fuzzer';
 
@@ -390,6 +391,79 @@ test.describe('Industrial Failure Cases & Self-Correction Autopilot Matrix (FAIL
     expect(drsResult.totalProcessed).toBe(5);
     expect(drsResult.detectedOrientationSwitch).toBe(true);
     expect(drsResult.drsTransitionsCount).toBe(2);
+  });
+
+  test('FAIL-09 Autocorrection: WebRTC RTP FU-A fragment loss must be detected and corrupted partial NAL discarded', () => {
+    const demuxer = new RtpStreamDemuxer({ isHevc: false });
+
+    // Construct FU-A Start packet (S=1, seq=100)
+    const p1 = new Uint8Array(14);
+    p1[0] = 0x80; p1[1] = 96; // M=0, PT=96
+    p1[2] = 0x00; p1[3] = 100; // seq=100
+    p1[4] = 0x00; p1[5] = 0x01; p1[6] = 0x5f; p1[7] = 0x90; // ts=90000
+    p1[12] = 0x7c; // FU indicator (NRI=3, type 28)
+    p1[13] = 0x85; // Start bit S=1, type 5 (IDR)
+
+    const r1 = demuxer.pushPacket(p1);
+    expect(r1).toBeNull(); // Intermediate packet, no frame emitted yet
+
+    // DROP packet seq=101 in weak network!
+    // Directly inject packet seq=102 (End bit E=1, Marker M=1)
+    const p3 = new Uint8Array(14);
+    p3[0] = 0x80; p3[1] = 0x80 | 96; // M=1
+    p3[2] = 0x00; p3[3] = 102; // seq=102 (GAP DETECTED: 101 missing!)
+    p3[4] = 0x00; p3[5] = 0x01; p3[6] = 0x5f; p3[7] = 0x90;
+    p3[12] = 0x7c;
+    p3[13] = 0x45; // End bit E=1, type 5
+
+    const r3 = demuxer.pushPacket(p3);
+    // FAIL-09 defense: Must NOT emit corrupted frame!
+    expect(r3).toBeNull();
+
+    const stats = demuxer.getStats();
+    expect(stats.fragmentLossEvents).toBe(1);
+    expect(stats.packetsDropped).toBe(1);
+
+    // Verify recovery: inject complete Single NAL packet (seq=103)
+    const p4 = new Uint8Array(16);
+    p4[0] = 0x80; p4[1] = 0x80 | 96; // M=1
+    p4[2] = 0x00; p4[3] = 103;
+    p4[4] = 0x00; p4[5] = 0x01; p4[6] = 0x6b; p4[7] = 0x48; // ts=93000
+    p4[12] = 0x65; // Single NAL IDR
+
+    const r4 = demuxer.pushPacket(p4);
+    expect(r4).not.toBeNull();
+    expect(r4?.isKeyframe).toBe(true);
+    expect(r4?.nals.length).toBe(1);
+  });
+
+  test('FAIL-10 Autocorrection: RTP 16-bit sequence number wrap-around (65535 -> 0) must maintain continuous unrolling', () => {
+    const demuxer = new RtpStreamDemuxer();
+
+    // Sequence unroll tests
+    const u1 = demuxer.unrollSequence(65534);
+    expect(u1).toBe(65534);
+
+    const u2 = demuxer.unrollSequence(65535);
+    expect(u2).toBe(65535);
+
+    // FAIL-10: Cross 65535 to 0
+    const u3 = demuxer.unrollSequence(0);
+    expect(u3).toBe(65536);
+
+    const u4 = demuxer.unrollSequence(1);
+    expect(u4).toBe(65537);
+
+    // Push RTP packet across wrap-around
+    const pWrap = new Uint8Array(16);
+    pWrap[0] = 0x80; pWrap[1] = 0x80 | 96; // M=1
+    pWrap[2] = 0x00; pWrap[3] = 0x00; // seq=0
+    pWrap[4] = 0x00; pWrap[5] = 0x00; pWrap[6] = 0x00; pWrap[7] = 0x01; // ts=1
+    pWrap[12] = 0x65; // Single NAL IDR
+
+    const frame = demuxer.pushPacket(pWrap);
+    expect(frame).not.toBeNull();
+    expect(demuxer.getStats().packetsDropped).toBe(0);
   });
 });
 

@@ -45,7 +45,7 @@ test.describe('Model Context Protocol (MCP) Server Integration & Tool Suite', ()
     expect(pingRes?.result).toEqual({});
   });
 
-  test('MCP Tool Discovery: tools/list must expose all 4 media agent tools', async () => {
+  test('MCP Tool Discovery: tools/list must expose all 5 media agent tools', async () => {
     const listRes = await server.handleRequest({
       jsonrpc: '2.0',
       id: 3,
@@ -54,13 +54,14 @@ test.describe('Model Context Protocol (MCP) Server Integration & Tool Suite', ()
 
     expect(listRes?.result?.tools).toBeDefined();
     const tools = listRes!.result.tools;
-    expect(tools.length).toBe(4);
+    expect(tools.length).toBe(5);
 
     const toolNames = tools.map((t: any) => t.name);
     expect(toolNames).toContain('probe_media');
     expect(toolNames).toContain('salvage_corrupted_mp4');
     expect(toolNames).toContain('transcode_video');
     expect(toolNames).toContain('diagnose_jitter_stream');
+    expect(toolNames).toContain('diagnose_rtp_stream');
 
     for (const t of tools) {
       expect(t.description).toBeTruthy();
@@ -178,4 +179,30 @@ test.describe('Model Context Protocol (MCP) Server Integration & Tool Suite', ()
     expect(fs.existsSync(optimizedPath)).toBe(true);
     expect(fs.statSync(optimizedPath).size).toBeGreaterThan(0);
   });
+
+  test('MCP Tool: diagnose_rtp_stream should analyze RTP stream bitstream and report FAIL-09/10 diagnostics', async () => {
+    const rtpRes = await server.handleRequest({
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: {
+        name: 'diagnose_rtp_stream',
+        arguments: {
+          isHevc: false,
+          packetCount: 60,
+          simulateLossRate: 10,
+          simulateSequenceWrap: true,
+        },
+      },
+    });
+
+    expect(rtpRes?.result?.isError).toBeFalsy();
+    const resultObj = JSON.parse(rtpRes!.result.content[0].text);
+    expect(resultObj.status).toBe('HEALTHY');
+    expect(resultObj.codec).toContain('RFC 6184');
+    expect(resultObj.simulation.wrapAroundTested).toBe(true);
+    expect(resultObj.resilienceAssessment.fail10SequenceWrapHandling).toContain('PASS');
+    expect(resultObj.telemetry.packetsReceived).toBeGreaterThan(0);
+  });
 });
+

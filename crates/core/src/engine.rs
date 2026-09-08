@@ -327,3 +327,114 @@ impl RustWasmMp4Muxer {
         self.inner.finalize()
     }
 }
+
+/// Reconstructed RTP video frame exposed to WASM.
+#[wasm_bindgen]
+pub struct RustWasmRtpFrame {
+    inner: crate::live::rtp::RtpFrame,
+}
+
+#[wasm_bindgen]
+impl RustWasmRtpFrame {
+    pub fn pts_us(&self) -> i64 {
+        self.inner.pts_us
+    }
+
+    pub fn is_keyframe(&self) -> bool {
+        self.inner.is_keyframe
+    }
+
+    pub fn ssrc(&self) -> u32 {
+        self.inner.ssrc
+    }
+
+    pub fn nal_count(&self) -> usize {
+        self.inner.nals.len()
+    }
+
+    pub fn get_nal(&self, index: usize) -> Option<Vec<u8>> {
+        self.inner.nals.get(index).cloned()
+    }
+
+    pub fn to_annex_b(&self) -> Vec<u8> {
+        self.inner.to_annex_b()
+    }
+
+    pub fn to_avcc(&self) -> Vec<u8> {
+        self.inner.to_avcc()
+    }
+}
+
+/// WebRTC RTP Depacketizer WASM Bridge (H.264 RFC 6184 / H.265 RFC 7798).
+#[wasm_bindgen]
+pub struct RustWasmRtpDepacketizer {
+    h264: Option<crate::live::rtp::RtpDepacketizerH264>,
+    h265: Option<crate::live::rtp::RtpDepacketizerH265>,
+}
+
+#[wasm_bindgen]
+impl RustWasmRtpDepacketizer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(is_hevc: bool) -> Self {
+        if is_hevc {
+            Self {
+                h264: None,
+                h265: Some(crate::live::rtp::RtpDepacketizerH265::new()),
+            }
+        } else {
+            Self {
+                h264: Some(crate::live::rtp::RtpDepacketizerH264::new()),
+                h265: None,
+            }
+        }
+    }
+
+    pub fn push_packet(&mut self, packet_bytes: &[u8]) -> Option<RustWasmRtpFrame> {
+        if let Some(ref mut depack) = self.h264 {
+            depack.push_packet(packet_bytes).ok().flatten().map(|inner| RustWasmRtpFrame { inner })
+        } else if let Some(ref mut depack) = self.h265 {
+            depack.push_packet(packet_bytes).ok().flatten().map(|inner| RustWasmRtpFrame { inner })
+        } else {
+            None
+        }
+    }
+
+    pub fn packets_received(&self) -> u64 {
+        self.h264.as_ref().map(|d| d.packets_received).or_else(|| self.h265.as_ref().map(|d| d.packets_received)).unwrap_or(0)
+    }
+
+    pub fn packets_dropped(&self) -> u64 {
+        self.h264.as_ref().map(|d| d.packets_dropped).or_else(|| self.h265.as_ref().map(|d| d.packets_dropped)).unwrap_or(0)
+    }
+
+    pub fn frames_assembled(&self) -> u64 {
+        self.h264.as_ref().map(|d| d.frames_assembled).or_else(|| self.h265.as_ref().map(|d| d.frames_assembled)).unwrap_or(0)
+    }
+}
+
+/// WebRTC RTP Packetizer WASM Bridge (H.264 RFC 6184).
+#[wasm_bindgen]
+pub struct RustWasmRtpPacketizer {
+    inner: crate::live::rtp::RtpPacketizerH264,
+}
+
+#[wasm_bindgen]
+impl RustWasmRtpPacketizer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(mtu: usize, payload_type: u8, ssrc: u32) -> Self {
+        Self {
+            inner: crate::live::rtp::RtpPacketizerH264::new(mtu, payload_type, ssrc),
+        }
+    }
+
+    pub fn packetize_nal(&mut self, nal: &[u8], pts_us: i64, is_last_nal: bool) -> js_sys::Array {
+        let packets = self.inner.packetize_nal(nal, pts_us, is_last_nal);
+        let arr = js_sys::Array::new();
+        for p in packets {
+            let uint8 = js_sys::Uint8Array::from(p.as_slice());
+            arr.push(&uint8);
+        }
+        arr
+    }
+}
+
