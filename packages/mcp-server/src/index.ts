@@ -9,7 +9,6 @@ export * from './tools/transcode';
 export * from './tools/jitter';
 export * from './tools/rtp';
 export * from './tools/tune';
-export * from './agent';
 
 /**
  * Run standard JSON-RPC 2.0 stdio server loop when executed directly via CLI.

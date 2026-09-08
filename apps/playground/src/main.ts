@@ -16,7 +16,7 @@ import {
   WebGpuMultiStreamCompositor,
   MultiTrackAudioMixer,
 } from '@web-ffmpeg-gpu/core';
-import { MediaAutopilotAgent } from '@web-ffmpeg-gpu/mcp-server';
+import { MediaAutopilotAgent, type AgentThoughtStep, type AutopilotDirective } from '@web-ffmpeg-gpu/agent';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
@@ -126,7 +126,7 @@ let p2pReceiver: LiveP2PReceiver | null = null;
 
 const autopilotAgent = new MediaAutopilotAgent({
   engineMode: 'rules-engine',
-  onThought: (step) => {
+  onThought: (step: AgentThoughtStep) => {
     const line = document.createElement('div');
     line.style.color = '#38bdf8';
     line.textContent = `[Thought ${step.iteration}] ${step.thought}`;
@@ -145,7 +145,7 @@ const autopilotAgent = new MediaAutopilotAgent({
     }
     autopilotTerminal.scrollTop = autopilotTerminal.scrollHeight;
   },
-  onDirective: (directive) => {
+  onDirective: (directive: AutopilotDirective) => {
     autopilotDirectiveBadge.textContent = directive.type;
     autopilotDirectiveBadge.style.color = '#a855f7';
     const dirLine = document.createElement('div');

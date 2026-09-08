@@ -11,11 +11,12 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/playground",
     "build:core": "npm run build --workspace=packages/core",
+    "build:agent": "npm run build --workspace=packages/agent",
     "build:mcp": "npm run build --workspace=packages/mcp-server",
     "build:playground": "npm run build --workspace=apps/playground",
     "build:wasm": "cargo build --workspace --target wasm32-unknown-unknown --release",
     "check:rust": "cargo check --workspace --target wasm32-unknown-unknown",
-    "build": "npm run build:core && npm run build:mcp && npm run build:playground",
+    "build": "npm run build:core && npm run build:mcp && npm run build:agent && npm run build:playground",
     "mcp": "node packages/mcp-server/dist/index.js",
     "test:e2e": "playwright test",
     "preview": "npm run preview --workspace=apps/playground"

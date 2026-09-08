@@ -1,71 +1,90 @@
 export type AgentEngineMode = 'rules-engine' | 'llm-react';
 
-export type StreamAlertType =
+export type AlertType =
   | 'PACKET_LOSS'
   | 'LIP_SYNC_DESYNC'
-  | 'STREAM_STALL'
-  | 'CORRUPTED_NAL'
-  | 'BITRATE_CONGESTION';
+  | 'BITSTREAM_ERROR'
+  | 'VRAM_SPIKE';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 
 export interface StreamAlert {
-  type: StreamAlertType;
+  type: AlertType;
   severity: AlertSeverity;
-  source: 'p2p-receiver' | 'p2p-sender' | 'loopback' | 'file-transcode';
+  source: string;
   metrics: {
     packetLossRate?: number;
+    rttMs?: number;
     avDriftMs?: number;
     fps?: number;
     bitrateKbps?: number;
-    rttMs?: number;
     failCode?: string;
-    details?: string;
+    [key: string]: any;
   };
   timestamp: number;
+}
+
+export interface AgentAction {
+  tool: string;
+  input: Record<string, any>;
 }
 
 export interface AgentThoughtStep {
   iteration: number;
   thought: string;
-  action?: {
-    tool: string;
-    input: Record<string, any>;
-  };
+  action?: AgentAction;
   observation?: string;
 }
 
-export type AutopilotDirectiveType =
-  | 'ADJUST_BITRATE'
+export type DirectiveType =
   | 'TRIGGER_PLI'
+  | 'ADJUST_BITRATE'
   | 'REMEDY_LIPSYNC'
-  | 'RESCUE_MEDIA'
-  | 'NOOP';
+  | 'SALVAGE_TRANSCODE'
+  | 'DROP_NON_IDR'
+  | 'NONE';
 
 export interface AutopilotDirective {
-  type: AutopilotDirectiveType;
-  targetBitrateKbps?: number;
+  type: DirectiveType;
+  reason: string;
+  payload: Record<string, any>;
   playbackRate?: number;
   delayMs?: number;
-  reason: string;
-  payload?: any;
+  targetBitrateKbps?: number;
+  timestamp: number;
 }
 
 export interface AutopilotReport {
   alert: StreamAlert;
+  resolved: boolean;
   engineMode: AgentEngineMode;
   steps: AgentThoughtStep[];
   directives: AutopilotDirective[];
-  resolved: boolean;
-  summary: string;
-  latencyMs: number;
+  durationMs: number;
 }
+
+export type AgentEventType =
+  | 'step_start'
+  | 'thought'
+  | 'action'
+  | 'observation'
+  | 'directive'
+  | 'report_finish';
+
+export interface AgentEvent {
+  type: AgentEventType;
+  data: any;
+  timestamp: number;
+}
+
+export type AgentEventListener = (event: AgentEvent) => void;
 
 export interface LlmConfig {
   apiKey?: string;
-  endpoint?: string;
+  baseURL?: string;
   model?: string;
-  isSimulated?: boolean;
+  temperature?: number;
+  maxIterations?: number;
 }
 
 export interface MediaAutopilotOptions {

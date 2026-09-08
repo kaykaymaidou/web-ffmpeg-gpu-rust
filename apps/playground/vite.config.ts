@@ -13,6 +13,7 @@ export default defineConfig({
     alias: {
       '@web-ffmpeg-gpu/core': resolve(__dirname, '../../packages/core/src/index.ts'),
       '@web-ffmpeg-gpu/mcp-server': resolve(__dirname, '../../packages/mcp-server/src/index.ts'),
+      '@web-ffmpeg-gpu/agent': resolve(__dirname, '../../packages/agent/src/index.ts'),
     },
   },
   build: {

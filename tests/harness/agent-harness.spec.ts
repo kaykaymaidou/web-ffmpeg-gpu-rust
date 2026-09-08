@@ -4,6 +4,11 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   MediaAutopilotAgent,
+  ToolRegistry,
+  SessionTrajectory,
+  SimulationProvider,
+} from '../../packages/agent/src';
+import {
   McpServer,
   handleProbeMedia,
   handleSalvageMp4,
@@ -236,5 +241,57 @@ test.describe('Media Autopilot Agent & DeepSeek ReAct Self-Healing Harness', () 
     await expect(terminal).toContainText('TRIGGER_PLI');
     await expect(terminal).toContainText('ADJUST_BITRATE');
     await expect(directiveBadge).toHaveText(/TRIGGER_PLI|ADJUST_BITRATE/);
+  });
+
+  test('Tier 7 [dsh Architecture - Pluggable ToolRegistry & Traceable Trajectory]: Decoupled registry, custom tool registration & event stream', async () => {
+    const registry = new ToolRegistry();
+    expect(registry.getToolNames()).toEqual([]);
+
+    // 1. Register custom tool
+    registry.registerTool({
+      name: 'gpu_thermal_throttle',
+      description: 'Throttle GPU compute shaders if temperature exceeds threshold.',
+      handler: async (input: { tempCelsius: number }) => {
+        return {
+          throttled: input.tempCelsius > 80,
+          prescribedShaderDownscale: input.tempCelsius > 80 ? 0.75 : 1.0,
+        };
+      },
+    });
+
+    expect(registry.getToolNames()).toContain('gpu_thermal_throttle');
+    expect(registry.getToolsSummary()).toContain('gpu_thermal_throttle');
+
+    // Execute tool
+    const execRes = await registry.executeTool('gpu_thermal_throttle', { tempCelsius: 85 });
+    const parsed = JSON.parse(execRes);
+    expect(parsed.throttled).toBe(true);
+    expect(parsed.prescribedShaderDownscale).toBe(0.75);
+
+    // 2. Traceable Session Trajectory
+    const trajectory = new SessionTrajectory();
+    const capturedEvents: string[] = [];
+
+    const unsubscribe = trajectory.subscribe((ev) => {
+      capturedEvents.push(ev.type);
+    });
+
+    trajectory.recordThought(1, 'Analyzing GPU thermal load');
+    trajectory.recordAction(1, 'gpu_thermal_throttle', { tempCelsius: 85 });
+    trajectory.recordObservation(1, execRes);
+    trajectory.recordDirective({
+      type: 'ADJUST_BITRATE',
+      reason: 'Thermal throttle active',
+      payload: { scale: 0.75 },
+      timestamp: Date.now(),
+    });
+
+    expect(capturedEvents).toEqual(['thought', 'action', 'observation', 'directive']);
+    expect(trajectory.getSteps().length).toBe(1);
+    expect(trajectory.getDirectives().length).toBe(1);
+
+    unsubscribe();
+    trajectory.recordThought(2, 'Second thought after unsubscribe');
+    expect(capturedEvents.length).toBe(4); // Did not receive 5th event after unsubscribe
   });
 });
