@@ -12,9 +12,15 @@ export {
   type TranscodeResult,
 } from './pipeline/transcoder';
 export { WebGpuVideoRenderer } from './renderer/gpu-renderer';
+export { WebGpuComputeEngine } from './renderer/gpu-compute-pipeline';
 export { SimpleMp4Demuxer, type DemuxedTrack, type DemuxedSample } from './demuxer/mp4-demuxer';
 export { StreamFeeder, type StreamPacket } from './stream/feeder';
 export { FILTERS_WGSL } from './shaders/filters.wgsl';
+export {
+  BILATERAL_DENOISE_COMPUTE_WGSL,
+  LANCZOS_UPSAMPLE_COMPUTE_WGSL,
+  HISTOGRAM_COMPUTE_WGSL,
+} from './shaders/compute-filters.wgsl';
 
 export type {
   FilterMode,

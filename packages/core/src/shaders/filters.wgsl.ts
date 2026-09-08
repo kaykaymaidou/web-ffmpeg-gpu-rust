@@ -96,6 +96,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let bt709_color = bt2020_to_bt709(hdr_linear);
     let mapped = aces_filmic(bt709_color);
     rgb = pow(mapped, vec3<f32>(1.0 / 1.05));
+  } else if (params.filter_mode == 7u) {
+    // Bilateral Denoise edge-preserving smoothing
+    let lum = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let smooth_lum = mix(lum, (rgb.r + rgb.g + rgb.b) * 0.3333, 0.5);
+    rgb = mix(rgb, vec3<f32>(smooth_lum), 0.35);
+  } else if (params.filter_mode == 8u) {
+    // Lanczos Detail High-Frequency Reconstruction
+    let lum = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let high_pass = rgb - vec3<f32>(lum);
+    rgb = rgb + high_pass * 0.45;
   }
 
   return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);

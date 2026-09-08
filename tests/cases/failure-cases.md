@@ -20,6 +20,8 @@
 | **FAIL-08** | **直播动态分辨率突变 (Dynamic Resolution Switching / DRS)**<br>OBS/WebRTC 弱网自适应码率突然从 1080p 骤降为 720p，或横竖屏动态切换 | 渲染器与 Canvas 初始纹理尺寸固定，后续尺寸不匹配导致 WebGPU 抛出异常崩溃、画面撕裂变形或黑屏 | **动态视口与信箱模式自适应 (Adaptive Viewport Re-layout)**：渲染管线监测输入 `VideoFrame.displayWidth / displayHeight` 变更，自动动态调整画布视口尺寸与 Letterbox/Pillarbox 黑边保护 | 分辨率骤变时渲染管线零崩溃，画面平滑过度无拉伸 |
 | **FAIL-09** | **WebRTC RTP 分片丢失与残损熔断 (RTP FU-A / FU Packet Loss)**<br>弱网环境下，一个 4K/1080p 帧由 40+ 个 FU-A/FU 分片组成，中间某分片丢失（如丢第 18 包） | 传统解包器将缺损的分片拼合，脏数据喂入 `VideoDecoder` 导致致命 `EncodingError` 崩溃抛错，画面永久绿屏或持续马赛克 | **分片连续性校验与坏帧熔断清空 (Corrupt Buffer Purge)**：解包器实时监控 `expected_seq`，检测到分片间隙断裂立即熔断当前分片缓存，拒绝向解码器输出不完整 NAL，并在统计中标记丢包等待下一合法关键帧 | WebCodecs 零抛错，解码管道平稳无死锁 |
 | **FAIL-10** | **16 位 RTP 序列号越界与 90kHz 时钟回环 (RTP Sequence Wrap-around 65535->0)**<br>高码率 60fps 码流推流 1~2 分钟后序列号达到 65535 并跨越回 0 | 简单无符号比较 `seq < last_seq` 误将新包判定为过期的远古历史包，Jitter Buffer 触发毁灭性丢包雪崩，直播断流 | **RFC 3550 模运算连续解环绕器 (Modular 16-bit Unroller)**：使用 `(seq.wrapping_sub(max_seq)) as i16` 模算距离展开为 64 位单调递增包序与 90kHz 微秒 PTS，平滑越过 65535 边界 | 跨越 65535 临界点 0 丢包，时间戳平滑单调前进 |
+| **FAIL-11** | **WebGPU 计算着色器边界越界与奇数分辨率下溢 (WebGPU Compute Workgroup Clamping & Odd Dimension Underflow)**<br>移动端采集或非标分辨率（如 1081p、853x479），工作组尺寸 16x16 向上取整引发越界线程 | 越界线程尝试读取或写入未分配纹理空间，触发 WebGPU 校验致命报错，导致 `GPUDevice.lost` 驱动崩溃断开，整条转码/播放链路死亡 | **计算着色器边界早退与自愈截断 (Early-Exit Workgroup Clamping)**：WGSL 计算管线首行强制校验 `if (global_id.x >= width \|\| global_id.y >= height) { return; }`，分发逻辑配合 `Math.ceil(dim / 16)` 严格安全防护 | 奇数/非标分辨率 0 崩溃，GPU 驱动平稳无 Device Lost |
+
 
 
 

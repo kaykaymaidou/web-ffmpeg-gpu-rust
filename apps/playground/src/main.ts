@@ -1,5 +1,7 @@
-import { WebFfmpegEngine, WebFfmpegTranscoder, SimpleMp4Demuxer } from '@web-ffmpeg-gpu/core';
+import { WebFfmpegEngine, WebFfmpegTranscoder, SimpleMp4Demuxer, WebGpuComputeEngine } from '@web-ffmpeg-gpu/core';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
+
+(window as any).WebGpuComputeEngine = WebGpuComputeEngine;
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;

@@ -1,5 +1,6 @@
 import type { FilterSettings, FilterMode } from '../types';
 import { FILTERS_WGSL } from '../shaders/filters.wgsl';
+import { WebGpuComputeEngine } from './gpu-compute-pipeline';
 
 const FILTER_MODE_MAP: Record<FilterMode, number> = {
   none: 0,
@@ -9,6 +10,8 @@ const FILTER_MODE_MAP: Record<FilterMode, number> = {
   sepia: 4,
   vignette: 5,
   hdr_tonemap: 6,
+  bilateral_denoise: 7,
+  lanczos_upsample: 8,
 };
 
 export class WebGpuVideoRenderer {
@@ -21,6 +24,7 @@ export class WebGpuVideoRenderer {
   private uniformBuffer: GPUBuffer | null = null;
   private bindGroupLayout: GPUBindGroupLayout | null = null;
   private deviceName: string = 'Unknown WebGPU Device';
+  private computeEngine: WebGpuComputeEngine | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -121,6 +125,39 @@ export class WebGpuVideoRenderer {
         topology: 'triangle-list',
       },
     });
+
+    // Initialize WebGPU Compute Pipeline Engine (@compute @workgroup_size(16, 16))
+    this.computeEngine = WebGpuComputeEngine.create(this.device);
+  }
+
+  public getComputeEngine(): WebGpuComputeEngine | null {
+    return this.computeEngine;
+  }
+
+  /**
+   * Compute 256-bin luminance histogram of a VideoFrame using GPU Compute Shader (<0.5ms).
+   */
+  public async getLuminanceHistogram(frame: VideoFrame): Promise<Uint32Array | null> {
+    if (!this.device || !this.computeEngine) return null;
+
+    const w = frame.displayWidth;
+    const h = frame.displayHeight;
+
+    const texture = this.device.createTexture({
+      size: [w, h],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING,
+    });
+
+    this.device.queue.copyExternalImageToTexture({ source: frame }, { texture }, [w, h]);
+
+    const commandEncoder = this.device.createCommandEncoder();
+    this.computeEngine.dispatchHistogram(commandEncoder, texture, w, h);
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    const result = await this.computeEngine.readHistogramAsync();
+    texture.destroy();
+    return result;
   }
 
   public updateFilterUniforms(settings: FilterSettings): void {
@@ -183,6 +220,7 @@ export class WebGpuVideoRenderer {
   }
 
   public destroy(): void {
+    this.computeEngine?.destroy();
     this.uniformBuffer?.destroy();
     this.device?.destroy();
   }

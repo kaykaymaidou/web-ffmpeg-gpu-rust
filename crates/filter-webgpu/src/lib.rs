@@ -11,6 +11,9 @@ pub enum GpuFilterType {
     ColorGradingLut = 4,
     GaussianBlur = 5,
     HdrToneMapping = 6,
+    ComputeBilateralDenoise = 7,
+    ComputeLanczosUpsample = 8,
+    ComputeHistogram = 9,
 }
 
 /// GPU Filter parameter definition block.
@@ -22,6 +25,8 @@ pub struct GpuFilterParams {
     pub contrast: f32,
     pub saturation: f32,
     pub blur_radius: f32,
+    pub sigma_spatial: f32,
+    pub sigma_range: f32,
 }
 
 #[wasm_bindgen]
@@ -34,6 +39,8 @@ impl GpuFilterParams {
             contrast: 1.0,
             saturation: 1.0,
             blur_radius: 0.0,
+            sigma_spatial: 2.0,
+            sigma_range: 0.15,
         }
     }
 
@@ -52,4 +59,13 @@ impl GpuFilterParams {
     pub fn set_blur_radius(&mut self, val: f32) {
         self.blur_radius = val;
     }
+
+    pub fn set_sigma_spatial(&mut self, val: f32) {
+        self.sigma_spatial = val;
+    }
+
+    pub fn set_sigma_range(&mut self, val: f32) {
+        self.sigma_range = val;
+    }
 }
+
