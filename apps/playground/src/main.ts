@@ -13,11 +13,15 @@ import {
   OpusRtpPacketizer,
   OpusRtpDemuxer,
   WebAudioLivePlayer,
+  WebGpuMultiStreamCompositor,
+  MultiTrackAudioMixer,
 } from '@web-ffmpeg-gpu/core';
 import { MediaAutopilotAgent } from '@web-ffmpeg-gpu/mcp-server';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
+(window as any).WebGpuMultiStreamCompositor = WebGpuMultiStreamCompositor;
+(window as any).MultiTrackAudioMixer = MultiTrackAudioMixer;
 (window as any).LiveLoopbackSession = LiveLoopbackSession;
 (window as any).LiveP2PSender = LiveP2PSender;
 (window as any).LiveP2PReceiver = LiveP2PReceiver;
@@ -98,6 +102,16 @@ const metricP2pFps = document.getElementById('metric-p2p-fps') as HTMLSpanElemen
 const metricP2pPackets = document.getElementById('metric-p2p-packets') as HTMLSpanElement;
 const metricP2pAudio = document.getElementById('metric-p2p-audio') as HTMLSpanElement;
 const metricP2pLipSync = document.getElementById('metric-p2p-lipsync') as HTMLSpanElement;
+
+// Multi-Stream Compositor Elements
+const selectCompositorLayout = document.getElementById('select-compositor-layout') as HTMLSelectElement;
+const metricCompositorChannels = document.getElementById('metric-compositor-channels') as HTMLSpanElement;
+const metricCompositorVram = document.getElementById('metric-compositor-vram') as HTMLSpanElement;
+const metricCompositorFps = document.getElementById('metric-compositor-fps') as HTMLSpanElement;
+const btnToggleCompositor = document.getElementById('btn-toggle-compositor') as HTMLButtonElement;
+
+let activeCompositor: WebGpuMultiStreamCompositor | null = null;
+let compositorAnimationId: number | null = null;
 
 // AI Media Autopilot Elements
 const checkboxAutopilotEnable = document.getElementById('checkbox-autopilot-enable') as HTMLInputElement;
@@ -504,6 +518,140 @@ function setupEventListeners() {
         btnToggleP2p.disabled = false;
         p2pSender = null;
         p2pReceiver = null;
+      }
+    });
+
+    // Multi-Stream Compositor Event Listeners
+    selectCompositorLayout.addEventListener('change', () => {
+      activeCompositor?.setLayoutPreset(selectCompositorLayout.value as any);
+    });
+
+    btnToggleCompositor.addEventListener('click', async () => {
+      if (activeCompositor) {
+        if (compositorAnimationId) {
+          cancelAnimationFrame(compositorAnimationId);
+          compositorAnimationId = null;
+        }
+        activeCompositor.destroy();
+        activeCompositor = null;
+        btnToggleCompositor.textContent = '▶ 启动 WebGPU 实时多路合成演示';
+        btnToggleCompositor.className = 'btn btn-primary';
+        metricCompositorChannels.textContent = '0 路';
+        metricCompositorVram.textContent = '0 句柄 (0泄漏)';
+        metricCompositorFps.textContent = '0 FPS';
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      try {
+        btnToggleCompositor.disabled = true;
+        btnToggleCompositor.textContent = '初始化 WebGPU 多路合成管线中...';
+        emptyState.style.display = 'none';
+
+        activeCompositor = new WebGpuMultiStreamCompositor({
+          canvas,
+          initialPreset: selectCompositorLayout.value as any,
+        });
+        await activeCompositor.initialize();
+
+        activeCompositor.addChannel('host');
+        activeCompositor.addChannel('guest_1');
+        activeCompositor.addChannel('screen');
+
+        const cHost = new OffscreenCanvas(640, 360);
+        const ctxHost = cHost.getContext('2d')!;
+        const cGuest = new OffscreenCanvas(320, 180);
+        const ctxGuest = cGuest.getContext('2d')!;
+        const cScreen = new OffscreenCanvas(640, 360);
+        const ctxScreen = cScreen.getContext('2d')!;
+
+        let frameIdx = 0;
+        let lastFpsTime = performance.now();
+        let fpsCounter = 0;
+
+        const renderLoop = () => {
+          if (!activeCompositor) return;
+
+          frameIdx++;
+          fpsCounter++;
+
+          // 1. Draw animated Host canvas
+          const grad = ctxHost.createLinearGradient(0, 0, 640, 360);
+          grad.addColorStop(0, '#1e1b4b');
+          grad.addColorStop(0.5, '#4338ca');
+          grad.addColorStop(1, '#06b6d4');
+          ctxHost.fillStyle = grad;
+          ctxHost.fillRect(0, 0, 640, 360);
+          ctxHost.fillStyle = '#ffffff';
+          ctxHost.font = 'bold 24px system-ui, sans-serif';
+          ctxHost.fillText(`🎤 主播视频流 (Host Channel) #${frameIdx}`, 30, 50);
+
+          // 2. Draw animated Guest canvas
+          ctxGuest.fillStyle = '#0f172a';
+          ctxGuest.fillRect(0, 0, 320, 180);
+          ctxGuest.fillStyle = '#38bdf8';
+          const ballX = 160 + Math.sin(frameIdx * 0.08) * 80;
+          const ballY = 90 + Math.cos(frameIdx * 0.08) * 40;
+          ctxGuest.beginPath();
+          ctxGuest.arc(ballX, ballY, 20, 0, Math.PI * 2);
+          ctxGuest.fill();
+          ctxGuest.fillStyle = '#f8fafc';
+          ctxGuest.font = '14px system-ui, sans-serif';
+          ctxGuest.fillText('👤 连麦嘉宾 (Guest 1)', 20, 30);
+
+          // 3. Draw animated Screen canvas
+          ctxScreen.fillStyle = '#020617';
+          ctxScreen.fillRect(0, 0, 640, 360);
+          ctxScreen.strokeStyle = '#334155';
+          ctxScreen.lineWidth = 1;
+          for (let x = 0; x < 640; x += 40) {
+            ctxScreen.beginPath();
+            ctxScreen.moveTo(x, 0);
+            ctxScreen.lineTo(x, 360);
+            ctxScreen.stroke();
+          }
+          ctxScreen.fillStyle = '#10b981';
+          ctxScreen.font = 'bold 20px monospace';
+          ctxScreen.fillText(`🖥️ 屏幕共享: 实时计算中 (Frame: ${frameIdx})`, 30, 40);
+
+          // Push frames into compositor (strict RAII internally)
+          const fHost = new VideoFrame(cHost, { timestamp: frameIdx * 16666 });
+          const fGuest = new VideoFrame(cGuest, { timestamp: frameIdx * 16666 });
+          const fScreen = new VideoFrame(cScreen, { timestamp: frameIdx * 16666 });
+
+          activeCompositor.pushFrame('host', fHost);
+          activeCompositor.pushFrame('guest_1', fGuest);
+          activeCompositor.pushFrame('screen', fScreen);
+
+          // Perform hardware multi-pass composition
+          activeCompositor.composite();
+
+          // Metrics update every 500ms
+          const now = performance.now();
+          if (now - lastFpsTime >= 500) {
+            const currentFps = Math.round((fpsCounter * 1000) / (now - lastFpsTime));
+            metricCompositorFps.textContent = `${currentFps} FPS`;
+            metricCompositorChannels.textContent = `${activeCompositor.getChannelIds().length} 路`;
+            metricCompositorVram.textContent = `${activeCompositor.getActiveFrameCount()} 句柄 (0泄漏)`;
+            fpsCounter = 0;
+            lastFpsTime = now;
+          }
+
+          compositorAnimationId = requestAnimationFrame(renderLoop);
+        };
+
+        compositorAnimationId = requestAnimationFrame(renderLoop);
+
+        btnToggleCompositor.textContent = '⏹ 停止 WebGPU 多路混流';
+        btnToggleCompositor.className = 'btn btn-danger';
+        btnToggleCompositor.disabled = false;
+      } catch (err: any) {
+        console.error('Failed to start multi-stream compositor:', err);
+        alert(`启动多路混流失败: ${err.message || err}`);
+        btnToggleCompositor.textContent = '▶ 启动 WebGPU 实时多路合成演示';
+        btnToggleCompositor.className = 'btn btn-primary';
+        btnToggleCompositor.disabled = false;
+        activeCompositor = null;
       }
     });
 

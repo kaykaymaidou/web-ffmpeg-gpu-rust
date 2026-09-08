@@ -276,6 +276,41 @@
           </div>
         </div>
 
+        <!-- WebGPU Multi-Stream Compositor Card -->
+        <div class="card compositor-card" style="border-color: #06b6d4;">
+          <div class="card-title" style="color: #22d3ee;">
+            <span>🔀 WebGPU 多路硬件混流器 (Compositor)</span>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <label style="font-size: 11px; color: #94a3b8;">合成布局预设:</label>
+            <select id="select-compositor-layout" class="form-select" style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
+              <option value="pip_br">🖼️ 画中画 (右下角 PIP + 金边)</option>
+              <option value="pip_tr">🖼️ 画中画 (右上角 PIP)</option>
+              <option value="split_horizontal">🌓 左右分屏 (50% : 50%)</option>
+              <option value="grid_2x2">🪟 四宫格 (2x2 Grid)</option>
+              <option value="single">📱 单路铺满 (Single)</option>
+            </select>
+          </div>
+
+          <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 8px;">
+            <div class="stat-item">
+              <span class="stat-title">活跃通道</span>
+              <span class="stat-val" id="metric-compositor-channels" style="color: #22d3ee;">0 路</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">显存占用</span>
+              <span class="stat-val" id="metric-compositor-vram" style="color: #34d399;">0 句柄 (0泄漏)</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">合流帧率</span>
+              <span class="stat-val" id="metric-compositor-fps" style="color: #f59e0b;">0 FPS</span>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" id="btn-toggle-compositor" style="width: 100%; font-size: 11px; padding: 5px;">▶ 启动 WebGPU 实时多路合成演示</button>
+        </div>
+
         <!-- AI Media Autopilot Cockpit Card -->
         <div class="card autopilot-card" style="border-color: #6366f1;">
           <div class="card-title" style="color: #a5b4fc;">

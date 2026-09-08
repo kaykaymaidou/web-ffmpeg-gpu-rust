@@ -15,9 +15,17 @@ export {
 } from './pipeline/transcoder';
 export { WebGpuVideoRenderer } from './renderer/gpu-renderer';
 export { WebGpuComputeEngine } from './renderer/gpu-compute-pipeline';
+export {
+  WebGpuMultiStreamCompositor,
+  type CompositorLayoutPreset,
+  type ChannelLayout,
+  type AspectRatioMode,
+  type MultiCompositorOptions,
+} from './renderer/multi-compositor';
 export { SimpleMp4Demuxer, type DemuxedTrack, type DemuxedSample } from './demuxer/mp4-demuxer';
 export { StreamFeeder, type StreamPacket } from './stream/feeder';
 export { FILTERS_WGSL } from './shaders/filters.wgsl';
+export { COMPOSITOR_WGSL } from './shaders/compositor.wgsl';
 export {
   BILATERAL_DENOISE_COMPUTE_WGSL,
   LANCZOS_UPSAMPLE_COMPUTE_WGSL,

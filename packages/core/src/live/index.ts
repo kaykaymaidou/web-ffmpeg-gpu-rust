@@ -7,3 +7,4 @@ export * from './p2p-signaling';
 export * from './p2p-session';
 export * from './opus-rtp';
 export * from './audio-player';
+export * from './audio-mixer';
