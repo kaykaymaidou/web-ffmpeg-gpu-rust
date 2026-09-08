@@ -276,6 +276,36 @@
           </div>
         </div>
 
+        <!-- AI Media Autopilot Cockpit Card -->
+        <div class="card autopilot-card" style="border-color: #6366f1;">
+          <div class="card-title" style="color: #a5b4fc;">
+            <span>🤖 AI 媒体自主巡检与自愈驾驶舱 (Autopilot Co-Pilot)</span>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <input type="checkbox" id="checkbox-autopilot-enable" checked style="cursor: pointer;" />
+              <label for="checkbox-autopilot-enable" style="font-size: 11px; color: #cbd5e1; cursor: pointer;">启用 AI 自动巡检与自愈</label>
+            </div>
+            <select id="select-autopilot-engine" class="form-select" style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
+              <option value="rules-engine">⚡ 规则专家引擎 (0ms 本地)</option>
+              <option value="llm-react">🧠 DeepSeek ReAct Agent (CoT)</option>
+            </select>
+          </div>
+
+          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px; display: flex; justify-content: space-between;">
+            <span>巡检状态: <span id="autopilot-status-badge" style="color: #34d399; font-weight: bold;">巡检守护中 (Active)</span></span>
+            <span>自愈决策: <span id="autopilot-directive-badge" style="color: #38bdf8;">无异常 (Nominal)</span></span>
+          </div>
+
+          <!-- Agent Thinking & Tool-Call Terminal -->
+          <div id="autopilot-terminal" style="height: 110px; overflow-y: auto; background: #090d16; border: 1px solid #1e293b; border-radius: 4px; padding: 6px; font-family: ui-monospace, monospace; font-size: 10.5px; line-height: 1.4; color: #94a3b8;">
+            <div style="color: #34d399;">[Autopilot Agent Initialized] Listening for telemetry anomalies across P2P and loopback streams...</div>
+          </div>
+
+          <button class="btn btn-secondary" id="btn-autopilot-simulate" style="width: 100%; margin-top: 8px; font-size: 11px; padding: 5px;">⚡ 注入突发丢包异常并验证 AI 自愈闭环</button>
+        </div>
+
         <!-- Architecture Principle Card -->
         <div class="card principle-card">
           <div class="card-title">

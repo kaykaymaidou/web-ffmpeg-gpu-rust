@@ -4,6 +4,14 @@ import { salvageToolDefinition, handleSalvageMp4 } from './tools/salvage';
 import { transcodeToolDefinition, handleTranscodeVideo } from './tools/transcode';
 import { jitterToolDefinition, handleDiagnoseJitter } from './tools/jitter';
 import { rtpToolDefinition, handleDiagnoseRtpStream } from './tools/rtp';
+import {
+  tuneBitrateToolDefinition,
+  handleTuneBitrate,
+  triggerPliToolDefinition,
+  handleTriggerPli,
+  remedyLipsyncToolDefinition,
+  handleRemedyLipsync,
+} from './tools/tune';
 
 export class McpServer {
   private tools: Map<string, { definition: McpToolDefinition; handler: (args: any) => Promise<McpToolResult> }> = new Map();
@@ -14,6 +22,9 @@ export class McpServer {
     this.registerTool(transcodeToolDefinition, handleTranscodeVideo);
     this.registerTool(jitterToolDefinition, handleDiagnoseJitter);
     this.registerTool(rtpToolDefinition, handleDiagnoseRtpStream);
+    this.registerTool(tuneBitrateToolDefinition, handleTuneBitrate);
+    this.registerTool(triggerPliToolDefinition, handleTriggerPli);
+    this.registerTool(remedyLipsyncToolDefinition, handleRemedyLipsync);
   }
 
   public registerTool(

@@ -54,7 +54,7 @@ test.describe('Model Context Protocol (MCP) Server Integration & Tool Suite', ()
 
     expect(listRes?.result?.tools).toBeDefined();
     const tools = listRes!.result.tools;
-    expect(tools.length).toBe(5);
+    expect(tools.length).toBe(8);
 
     const toolNames = tools.map((t: any) => t.name);
     expect(toolNames).toContain('probe_media');
@@ -62,6 +62,9 @@ test.describe('Model Context Protocol (MCP) Server Integration & Tool Suite', ()
     expect(toolNames).toContain('transcode_video');
     expect(toolNames).toContain('diagnose_jitter_stream');
     expect(toolNames).toContain('diagnose_rtp_stream');
+    expect(toolNames).toContain('tune_stream_bitrate');
+    expect(toolNames).toContain('trigger_keyframe_pli');
+    expect(toolNames).toContain('remedy_lipsync');
 
     for (const t of tools) {
       expect(t.description).toBeTruthy();

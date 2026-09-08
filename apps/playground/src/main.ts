@@ -14,6 +14,7 @@ import {
   OpusRtpDemuxer,
   WebAudioLivePlayer,
 } from '@web-ffmpeg-gpu/core';
+import { MediaAutopilotAgent } from '@web-ffmpeg-gpu/mcp-server';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
@@ -27,6 +28,7 @@ import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, Tran
 (window as any).OpusRtpPacketizer = OpusRtpPacketizer;
 (window as any).OpusRtpDemuxer = OpusRtpDemuxer;
 (window as any).WebAudioLivePlayer = WebAudioLivePlayer;
+(window as any).MediaAutopilotAgent = MediaAutopilotAgent;
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -97,8 +99,55 @@ const metricP2pPackets = document.getElementById('metric-p2p-packets') as HTMLSp
 const metricP2pAudio = document.getElementById('metric-p2p-audio') as HTMLSpanElement;
 const metricP2pLipSync = document.getElementById('metric-p2p-lipsync') as HTMLSpanElement;
 
+// AI Media Autopilot Elements
+const checkboxAutopilotEnable = document.getElementById('checkbox-autopilot-enable') as HTMLInputElement;
+const selectAutopilotEngine = document.getElementById('select-autopilot-engine') as HTMLSelectElement;
+const autopilotStatusBadge = document.getElementById('autopilot-status-badge') as HTMLSpanElement;
+const autopilotDirectiveBadge = document.getElementById('autopilot-directive-badge') as HTMLSpanElement;
+const autopilotTerminal = document.getElementById('autopilot-terminal') as HTMLDivElement;
+const btnAutopilotSimulate = document.getElementById('btn-autopilot-simulate') as HTMLButtonElement;
+
 let p2pSender: LiveP2PSender | null = null;
 let p2pReceiver: LiveP2PReceiver | null = null;
+
+const autopilotAgent = new MediaAutopilotAgent({
+  engineMode: 'rules-engine',
+  onThought: (step) => {
+    const line = document.createElement('div');
+    line.style.color = '#38bdf8';
+    line.textContent = `[Thought ${step.iteration}] ${step.thought}`;
+    autopilotTerminal.appendChild(line);
+    if (step.action) {
+      const actLine = document.createElement('div');
+      actLine.style.color = '#f59e0b';
+      actLine.textContent = `  ↳ Action: ${step.action.tool}(${JSON.stringify(step.action.input)})`;
+      autopilotTerminal.appendChild(actLine);
+    }
+    if (step.observation) {
+      const obsLine = document.createElement('div');
+      obsLine.style.color = '#94a3b8';
+      obsLine.textContent = `  ↳ Obs: ${step.observation.substring(0, 100)}...`;
+      autopilotTerminal.appendChild(obsLine);
+    }
+    autopilotTerminal.scrollTop = autopilotTerminal.scrollHeight;
+  },
+  onDirective: (directive) => {
+    autopilotDirectiveBadge.textContent = directive.type;
+    autopilotDirectiveBadge.style.color = '#a855f7';
+    const dirLine = document.createElement('div');
+    dirLine.style.color = '#34d399';
+    dirLine.style.fontWeight = 'bold';
+    dirLine.textContent = `⚡ [Directive] ${directive.type} -> ${directive.reason}`;
+    autopilotTerminal.appendChild(dirLine);
+    autopilotTerminal.scrollTop = autopilotTerminal.scrollHeight;
+
+    if (directive.type === 'TRIGGER_PLI') {
+      p2pReceiver?.requestKeyframe();
+      rtcSession?.requestKeyframe();
+    }
+  },
+});
+(window as any).autopilotAgent = autopilotAgent;
 
 // State
 let engine: WebFfmpegEngine | null = null;
@@ -297,6 +346,18 @@ function setupEventListeners() {
             const lossPct = m.rtpPacketsSent > 0 ? ((m.rtpPacketsDropped / m.rtpPacketsSent) * 100).toFixed(1) : '0.0';
             metricRtcPackets.textContent = `${m.rtpPacketsSent} / ${m.rtpPacketsDropped} (丢 ${lossPct}%)`;
             metricRtcRescues.textContent = `${m.fail09Rescues} 次 (PLI ${m.keyframeRequests})`;
+
+            if (checkboxAutopilotEnable.checked) {
+              const lossNum = Number(lossPct);
+              if (lossNum >= 8 || m.fail09Rescues > 0) {
+                autopilotAgent.feedTelemetry('loopback', {
+                  packetLossRate: lossNum,
+                  fps: m.playoutFps,
+                  rttMs: m.glassToGlassLatencyMs,
+                  failCode: m.fail09Rescues > 0 ? 'FAIL-09' : undefined,
+                }).catch(() => {});
+              }
+            }
           },
           onError: (err) => {
             console.error('RTC Session Error:', err);
@@ -412,6 +473,17 @@ function setupEventListeners() {
                 metricP2pLipSync.textContent = '未启用或暂无音频';
                 metricP2pLipSync.style.color = '#94a3b8';
               }
+
+              if (checkboxAutopilotEnable.checked) {
+                if (m.packetsDropped > 0 || (m.lipSyncStatus !== 'NO_AUDIO' && Math.abs(m.avDriftMs) > 40)) {
+                  autopilotAgent.feedTelemetry('p2p-receiver', {
+                    packetLossRate: m.packetsDropped > 0 ? 15 : 0,
+                    avDriftMs: m.avDriftMs,
+                    fps: m.playoutFps,
+                    failCode: m.fail09Rescues > 0 ? 'FAIL-09' : undefined,
+                  }).catch(() => {});
+                }
+              }
             },
             onError: (err) => console.error('[LiveP2PReceiver Error]', err),
           });
@@ -432,6 +504,46 @@ function setupEventListeners() {
         btnToggleP2p.disabled = false;
         p2pSender = null;
         p2pReceiver = null;
+      }
+    });
+
+    // AI Media Autopilot Event Listeners
+    selectAutopilotEngine.addEventListener('change', () => {
+      autopilotAgent.setEngineMode(selectAutopilotEngine.value as any);
+      const line = document.createElement('div');
+      line.style.color = '#c084fc';
+      line.textContent = `[Engine Switched] Decision engine set to: ${selectAutopilotEngine.value}`;
+      autopilotTerminal.appendChild(line);
+      autopilotTerminal.scrollTop = autopilotTerminal.scrollHeight;
+    });
+
+    checkboxAutopilotEnable.addEventListener('change', () => {
+      autopilotStatusBadge.textContent = checkboxAutopilotEnable.checked ? '巡检守护中 (Active)' : '已休眠 (Disabled)';
+      autopilotStatusBadge.style.color = checkboxAutopilotEnable.checked ? '#34d399' : '#94a3b8';
+    });
+
+    btnAutopilotSimulate.addEventListener('click', async () => {
+      btnAutopilotSimulate.disabled = true;
+      const initialText = btnAutopilotSimulate.textContent;
+      btnAutopilotSimulate.textContent = '⏳ AI 正在诊断与编排自愈中...';
+      try {
+        await autopilotAgent.diagnoseAlert({
+          type: 'PACKET_LOSS',
+          severity: 'critical',
+          source: p2pReceiver ? 'p2p-receiver' : 'loopback',
+          metrics: {
+            packetLossRate: 22,
+            rttMs: 95,
+            bitrateKbps: 900,
+            failCode: 'FAIL-09',
+          },
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        console.error('Autopilot simulation failed:', err);
+      } finally {
+        btnAutopilotSimulate.disabled = false;
+        btnAutopilotSimulate.textContent = initialText;
       }
     });
   }

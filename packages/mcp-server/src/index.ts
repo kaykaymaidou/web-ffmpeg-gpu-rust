@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-import readline from 'node:readline';
 import { McpServer } from './server';
 import type { JsonRpcRequest } from './types';
 
@@ -9,11 +7,16 @@ export * from './tools/probe';
 export * from './tools/salvage';
 export * from './tools/transcode';
 export * from './tools/jitter';
+export * from './tools/rtp';
+export * from './tools/tune';
+export * from './agent';
 
 /**
  * Run standard JSON-RPC 2.0 stdio server loop when executed directly via CLI.
  */
-export function startStdioServer(): void {
+export async function startStdioServer(): Promise<void> {
+  if (typeof process === 'undefined') return;
+  const readline = await import('node:readline');
   const server = new McpServer();
   const rl = readline.createInterface({
     input: process.stdin,
@@ -48,7 +51,15 @@ export function startStdioServer(): void {
   process.stderr.write('🚀 [Web-FFmpeg-GPU MCP] Agent Server listening on stdio (JSON-RPC 2.0)\n');
 }
 
-// Auto-start if executed directly
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` || process.argv[1]?.endsWith('index.js')) {
-  startStdioServer();
+// Auto-start if executed directly via Node CLI
+if (
+  typeof process !== 'undefined' &&
+  Array.isArray(process.argv) &&
+  process.argv[1] &&
+  (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}` ||
+    process.argv[1].endsWith('index.js'))
+) {
+  startStdioServer().catch((err) => {
+    console.error('Failed to start MCP Stdio Server:', err);
+  });
 }

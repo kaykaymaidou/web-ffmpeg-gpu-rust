@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@web-ffmpeg-gpu/core": "*"
+    "@web-ffmpeg-gpu/core": "*",
+    "@web-ffmpeg-gpu/mcp-server": "*"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.72",

@@ -52,7 +52,7 @@ export async function handleProbeMedia(args: { filePath: string }): Promise<McpT
     let hasRetrogradePts = false;
 
     if (!videoTrack) {
-      issues.push('❌ No valid video track found. File may be severely truncated or corrupted.');
+      issues.push('❌ [FAIL-05] No valid video track or moov box found. File may be truncated; activate salvage mode to recover.');
     } else {
       // Check FAIL-01
       if (videoTrack.samples.length > 0 && videoTrack.samples[0].type !== 'key') {
