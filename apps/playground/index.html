@@ -242,6 +242,11 @@
             </div>
           </div>
 
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+            <input type="checkbox" id="checkbox-p2p-audio" checked style="cursor: pointer;" />
+            <label for="checkbox-p2p-audio" style="font-size: 11px; color: #cbd5e1; cursor: pointer;">启用实时音频链路 (RFC 7587 Opus 48kHz + 唇形对齐)</label>
+          </div>
+
           <div style="display: flex; gap: 8px; margin-bottom: 12px;">
             <button class="btn btn-primary" id="btn-toggle-p2p" style="flex: 1;">▶ 启动 P2P 连接</button>
             <button class="btn btn-secondary" id="btn-p2p-pli" disabled style="flex: 1;">⚡ 反向 PLI 刷新</button>
@@ -259,6 +264,14 @@
             <div class="stat-item">
               <span class="stat-title">DataChannel 报文收发</span>
               <span class="stat-val" id="metric-p2p-packets">0 pkts</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">Opus 音频通道包数</span>
+              <span class="stat-val" id="metric-p2p-audio">0 pkts (关闭)</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">唇形音画对齐 (A/V Drift)</span>
+              <span class="stat-val" id="metric-p2p-lipsync" style="color: #34d399;">-- ms (对齐)</span>
             </div>
           </div>
         </div>

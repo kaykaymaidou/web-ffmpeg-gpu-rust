@@ -8,6 +8,11 @@ import {
   LiveP2PReceiver,
   BroadcastChannelSignaling,
   WebSocketSignaling,
+  HardwareAudioEncoder,
+  HardwareAudioDecoder,
+  OpusRtpPacketizer,
+  OpusRtpDemuxer,
+  WebAudioLivePlayer,
 } from '@web-ffmpeg-gpu/core';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
@@ -17,6 +22,11 @@ import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, Tran
 (window as any).LiveP2PReceiver = LiveP2PReceiver;
 (window as any).BroadcastChannelSignaling = BroadcastChannelSignaling;
 (window as any).WebSocketSignaling = WebSocketSignaling;
+(window as any).HardwareAudioEncoder = HardwareAudioEncoder;
+(window as any).HardwareAudioDecoder = HardwareAudioDecoder;
+(window as any).OpusRtpPacketizer = OpusRtpPacketizer;
+(window as any).OpusRtpDemuxer = OpusRtpDemuxer;
+(window as any).WebAudioLivePlayer = WebAudioLivePlayer;
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -78,11 +88,14 @@ let rtcSession: LiveLoopbackSession | null = null;
 // P2P Multi-Peer Direct Streaming Elements
 const selectP2pRole = document.getElementById('select-p2p-role') as HTMLSelectElement;
 const inputP2pRoom = document.getElementById('input-p2p-room') as HTMLInputElement;
+const checkboxP2pAudio = document.getElementById('checkbox-p2p-audio') as HTMLInputElement;
 const btnToggleP2p = document.getElementById('btn-toggle-p2p') as HTMLButtonElement;
 const btnP2pPli = document.getElementById('btn-p2p-pli') as HTMLButtonElement;
 const p2pStatusBadge = document.getElementById('p2p-status-badge') as HTMLSpanElement;
 const metricP2pFps = document.getElementById('metric-p2p-fps') as HTMLSpanElement;
 const metricP2pPackets = document.getElementById('metric-p2p-packets') as HTMLSpanElement;
+const metricP2pAudio = document.getElementById('metric-p2p-audio') as HTMLSpanElement;
+const metricP2pLipSync = document.getElementById('metric-p2p-lipsync') as HTMLSpanElement;
 
 let p2pSender: LiveP2PSender | null = null;
 let p2pReceiver: LiveP2PReceiver | null = null;
@@ -334,11 +347,15 @@ function setupEventListeners() {
         btnP2pPli.disabled = true;
         p2pStatusBadge.textContent = '已断开 (Disconnected)';
         p2pStatusBadge.style.color = '#cbd5e1';
+        metricP2pAudio.textContent = '0 pkts (关闭)';
+        metricP2pLipSync.textContent = '-- ms (对齐)';
+        metricP2pLipSync.style.color = '#34d399';
         return;
       }
 
       const roomId = inputP2pRoom.value.trim() || 'live-room-alpha';
       const role = selectP2pRole.value;
+      const enableAudio = checkboxP2pAudio.checked;
       const signaling = new BroadcastChannelSignaling(roomId);
 
       try {
@@ -350,6 +367,7 @@ function setupEventListeners() {
           p2pSender = new LiveP2PSender({
             roomId,
             signaling,
+            enableAudio,
             onStateChange: (st) => {
               p2pStatusBadge.textContent = `P2P 状态: ${st}`;
               p2pStatusBadge.style.color = st === 'connected' ? '#34d399' : '#f59e0b';
@@ -357,6 +375,9 @@ function setupEventListeners() {
             onMetrics: (m) => {
               metricP2pFps.textContent = `${m.ingestFps} FPS / ${m.bitrateKbps} kbps`;
               metricP2pPackets.textContent = `${m.rtpPacketsSent} pkts (PLI: ${m.keyframeRequests})`;
+              metricP2pAudio.textContent = `${m.audioPacketsSent} pkts (${enableAudio ? '发送中' : '已禁用'})`;
+              metricP2pLipSync.textContent = enableAudio ? '发射基准时钟 (Master)' : '未启用音频';
+              metricP2pLipSync.style.color = '#38bdf8';
             },
             onError: (err) => console.error('[LiveP2PSender Error]', err),
           });
@@ -373,6 +394,7 @@ function setupEventListeners() {
             roomId,
             signaling,
             renderCanvas: canvas,
+            enableAudio,
             onStateChange: (st) => {
               p2pStatusBadge.textContent = `P2P 状态: ${st}`;
               p2pStatusBadge.style.color = st === 'connected' ? '#34d399' : '#f59e0b';
@@ -380,6 +402,16 @@ function setupEventListeners() {
             onMetrics: (m) => {
               metricP2pFps.textContent = `${m.playoutFps} FPS`;
               metricP2pPackets.textContent = `${m.rtpPacketsReceived} pkts (丢 ${m.packetsDropped} / 自愈 ${m.fail09Rescues})`;
+              metricP2pAudio.textContent = `${m.audioPacketsReceived} pkts (${enableAudio ? '解码中' : '已禁用'})`;
+              if (enableAudio && m.lipSyncStatus !== 'NO_AUDIO') {
+                const absDrift = Math.abs(m.avDriftMs);
+                const driftColor = absDrift <= 40 ? '#34d399' : (absDrift <= 80 ? '#f59e0b' : '#ef4444');
+                metricP2pLipSync.textContent = `${m.avDriftMs.toFixed(1)} ms (${m.lipSyncStatus})`;
+                metricP2pLipSync.style.color = driftColor;
+              } else {
+                metricP2pLipSync.textContent = '未启用或暂无音频';
+                metricP2pLipSync.style.color = '#94a3b8';
+              }
             },
             onError: (err) => console.error('[LiveP2PReceiver Error]', err),
           });

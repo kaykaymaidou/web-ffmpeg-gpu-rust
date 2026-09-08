@@ -28,6 +28,7 @@ export class MasterClockSync {
   private audioBaseTime: number = 0;
   private streamBasePtsUs: number = 0;
   private isInitialized: boolean = false;
+  private hasAudioAnchor: boolean = false;
 
   constructor(config: ClockSyncConfig = {}, audioCtx?: AudioContext) {
     this.tightThresholdMs = config.tightThresholdMs ?? 40;
@@ -36,6 +37,30 @@ export class MasterClockSync {
     if (audioCtx) {
       this.audioCtx = audioCtx;
     }
+  }
+
+  public setAudioContext(audioCtx: AudioContext): void {
+    if (this.audioCtx !== audioCtx) {
+      this.audioCtx = audioCtx;
+      if (this.isInitialized) {
+        this.audioBaseTime = this.getCurrentHardwareTimeSec();
+      }
+    }
+  }
+
+  /**
+   * Update the master clock anchor whenever an audio frame is decoded and scheduled.
+   * Anchors the master timeline to the physical audio playout clock.
+   */
+  public updateAudioClock(audioPtsUs: number, scheduledTimeSec?: number): void {
+    this.streamBasePtsUs = audioPtsUs;
+    this.audioBaseTime = scheduledTimeSec !== undefined ? scheduledTimeSec : this.getCurrentHardwareTimeSec();
+    this.isInitialized = true;
+    this.hasAudioAnchor = true;
+  }
+
+  public get hasAudio(): boolean {
+    return this.hasAudioAnchor;
   }
 
   /**
@@ -112,14 +137,14 @@ export class MasterClockSync {
 
   public reset(): void {
     this.isInitialized = false;
+    this.hasAudioAnchor = false;
     this.audioBaseTime = 0;
     this.streamBasePtsUs = 0;
   }
 
   private getCurrentHardwareTimeSec(): number {
     if (this.audioCtx && typeof this.audioCtx.currentTime === 'number') {
-      const latency = (this.audioCtx.outputLatency || 0) + (this.audioCtx.baseLatency || 0);
-      return Math.max(0, this.audioCtx.currentTime - latency);
+      return this.audioCtx.currentTime;
     }
     return performance.now() / 1000;
   }

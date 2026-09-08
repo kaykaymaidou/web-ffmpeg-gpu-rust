@@ -3,6 +3,8 @@
 export { WebFfmpegEngine } from './pipeline/pipeline';
 export { HardwareVideoDecoder } from './decoder/hardware-decoder';
 export { HardwareVideoEncoder, type VideoEncoderOptions, type ChunkCallback } from './encoder/hardware-encoder';
+export { HardwareAudioEncoder, type AudioEncoderOptions, type AudioChunkCallback } from './codec/audio-encoder';
+export { HardwareAudioDecoder, type AudioDecoderOptions, type AudioDataCallback } from './codec/audio-decoder';
 export { FastStartMp4Muxer, type MuxerVideoTrack, type MuxerAudioTrack } from './muxer/mp4-muxer';
 export {
   WebFfmpegTranscoder,

@@ -2,13 +2,18 @@
  * WebRTC DataChannel P2P Live Streaming Engine (RFC 0002).
  * 
  * Provides:
- * - LiveP2PSender: Broadcaster (Captures -> WebCodecs realtime encode -> RFC 6184 RTP -> RTCDataChannel -> Reverse PLI listener)
- * - LiveP2PReceiver: Viewer (RTCDataChannel -> RtpStreamDemuxer -> FAIL-09 defense -> WebCodecs decode -> WebGPU/Canvas render -> Reverse PLI trigger)
+ * - LiveP2PSender: Broadcaster (Dual-channel: Video H.264 RTP + Audio Opus RTP over RTCDataChannel)
+ * - LiveP2PReceiver: Viewer (Dual-channel depacketizer + WebCodecs hardware decoders + MasterClockSync Lip-Sync)
  */
 
 import { HardwareVideoEncoder } from '../encoder/hardware-encoder';
 import { HardwareVideoDecoder } from '../decoder/hardware-decoder';
+import { HardwareAudioEncoder } from '../codec/audio-encoder';
+import { HardwareAudioDecoder } from '../codec/audio-decoder';
 import { RtpStreamDemuxer, type AssembledRtpFrame } from './rtp-demuxer';
+import { OpusRtpPacketizer, OpusRtpDemuxer, type AssembledOpusPacket } from './opus-rtp';
+import { WebAudioLivePlayer } from './audio-player';
+import { MasterClockSync } from './clock-sync';
 import type { SignalingChannel, SignalingMessage } from './p2p-signaling';
 
 export interface P2PSenderOptions {
@@ -20,6 +25,8 @@ export interface P2PSenderOptions {
   height?: number;
   framerate?: number;
   bitrate?: number;
+  enableAudio?: boolean; // default: false
+  audioBitrate?: number; // default: 64000
   onStateChange?: (state: RTCPeerConnectionState) => void;
   onMetrics?: (metrics: P2PSenderMetrics) => void;
   onError?: (err: Error) => void;
@@ -28,9 +35,11 @@ export interface P2PSenderOptions {
 export interface P2PSenderMetrics {
   connectionState: RTCPeerConnectionState;
   dataChannelState: RTCDataChannelState | 'closed';
+  audioDataChannelState: RTCDataChannelState | 'closed';
   ingestFps: number;
   bitrateKbps: number;
   rtpPacketsSent: number;
+  audioPacketsSent: number;
   keyframeRequests: number;
   isRunning: boolean;
 }
@@ -41,6 +50,7 @@ export interface P2PReceiverOptions {
   peerId?: string;
   rtcConfiguration?: RTCConfiguration;
   renderCanvas?: HTMLCanvasElement;
+  enableAudio?: boolean; // default: false
   onStateChange?: (state: RTCPeerConnectionState) => void;
   onMetrics?: (metrics: P2PReceiverMetrics) => void;
   onError?: (err: Error) => void;
@@ -49,11 +59,15 @@ export interface P2PReceiverOptions {
 export interface P2PReceiverMetrics {
   connectionState: RTCPeerConnectionState;
   dataChannelState: RTCDataChannelState | 'closed';
+  audioDataChannelState: RTCDataChannelState | 'closed';
   playoutFps: number;
   rtpPacketsReceived: number;
+  audioPacketsReceived: number;
   packetsDropped: number;
   fail09Rescues: number;
   glassToGlassLatencyMs: number;
+  avDriftMs: number;
+  lipSyncStatus: 'LIP_SYNC_ALIGNED' | 'VIDEO_LAGGING' | 'VIDEO_LEADING' | 'NO_AUDIO';
   isRunning: boolean;
 }
 
@@ -66,33 +80,42 @@ const DEFAULT_RTC_CONFIG: RTCConfiguration = {
 
 /**
  * LiveP2PSender:
- * Broadcasts video live stream to remote peers over WebRTC DataChannel.
+ * Broadcasts video and Opus audio live streams to remote peers over WebRTC DataChannels.
  */
 export class LiveP2PSender {
   private options: P2PSenderOptions;
   public peerId: string;
   private pc: RTCPeerConnection | null = null;
-  private dataChannel: RTCDataChannel | null = null;
-  private encoder: HardwareVideoEncoder | null = null;
+  private videoDataChannel: RTCDataChannel | null = null;
+  private audioDataChannel: RTCDataChannel | null = null;
+
+  // Video Codec & RTP
+  private videoEncoder: HardwareVideoEncoder | null = null;
+  private rtpSeq: number = 1;
+  private rtpSsrc: number = 0x2468ace0;
+  private mtu: number = 1200;
+  private forceNextKeyframe: boolean = true;
+  private cachedEncoderDescription: Uint8Array | null = null;
+
+  // Audio Codec & RTP
+  private audioEncoder: HardwareAudioEncoder | null = null;
+  private audioPacketizer: OpusRtpPacketizer | null = null;
+  private audioTimerId: any = null;
+
   private isRunning: boolean = false;
   private animTimerId: any = null;
   private captureCanvas: HTMLCanvasElement | null = null;
   private captureCtx: CanvasRenderingContext2D | null = null;
 
-  // RTP & Codec state
-  private rtpSeq: number = 1;
-  private rtpSsrc: number = 0x2468ace0;
-  private mtu: number = 1200; // conservative MTU for SCTP/DataChannel
-  private forceNextKeyframe: boolean = true;
-  private cachedEncoderDescription: Uint8Array | null = null;
-
   // Telemetry
   private metrics: P2PSenderMetrics = {
     connectionState: 'new',
     dataChannelState: 'closed',
+    audioDataChannelState: 'closed',
     ingestFps: 0,
     bitrateKbps: 0,
     rtpPacketsSent: 0,
+    audioPacketsSent: 0,
     keyframeRequests: 0,
     isRunning: false,
   };
@@ -109,7 +132,7 @@ export class LiveP2PSender {
     return { ...this.metrics };
   }
 
-  public async start(mediaTrack?: MediaStreamTrack): Promise<void> {
+  public async start(mediaTrack?: MediaStreamTrack, audioTrack?: MediaStreamTrack): Promise<void> {
     if (this.isRunning) {
       throw new Error('LiveP2PSender is already running');
     }
@@ -131,7 +154,6 @@ export class LiveP2PSender {
 
       try {
         if (msg.type === 'join') {
-          // A viewer joined! Initiate WebRTC Offer
           await this.initiatePeerConnection();
         } else if (msg.type === 'answer' && this.pc) {
           if (msg.sdp) {
@@ -142,7 +164,6 @@ export class LiveP2PSender {
             await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
           }
         } else if (msg.type === 'pli') {
-          // Received reverse PLI feedback from viewer
           this.requestKeyframe();
         }
       } catch (err: any) {
@@ -151,21 +172,18 @@ export class LiveP2PSender {
     });
 
     // 2. Initialize Hardware VideoEncoder
-    this.encoder = new HardwareVideoEncoder((chunk, metadata) => {
+    this.videoEncoder = new HardwareVideoEncoder((chunk, metadata) => {
       this.encodedFramesCount++;
       this.encodedBytesWindow += chunk.byteLength;
 
-      // Ingest parameter sets
       if (metadata?.decoderConfig?.description) {
         const desc = new Uint8Array(metadata.decoderConfig.description as ArrayBuffer);
         this.cachedEncoderDescription = desc;
         this.extractAndSendSpsPps(desc, chunk.timestamp);
       } else if (chunk.type === 'key' && this.cachedEncoderDescription) {
-        // Resend parameter sets on keyframes
         this.extractAndSendSpsPps(this.cachedEncoderDescription, chunk.timestamp);
       }
 
-      // Packetize into RFC 6184 RTP
       const chunkBytes = new Uint8Array(chunk.byteLength);
       chunk.copyTo(chunkBytes);
       this.packetizeAndTransmitChunk(chunkBytes, chunk.timestamp);
@@ -173,7 +191,7 @@ export class LiveP2PSender {
       this.options.onError?.(err);
     });
 
-    await this.encoder.configure({
+    await this.videoEncoder.configure({
       codec: 'avc1.42001f',
       width,
       height,
@@ -182,17 +200,52 @@ export class LiveP2PSender {
       latencyMode: 'realtime',
     });
 
-    // 3. Start Video Source (MediaTrack or Synthetic Animation)
-    if (mediaTrack && typeof (window as any).MediaStreamTrackProcessor !== 'undefined') {
-      this.startTrackProcessor(mediaTrack);
-    } else {
-      this.startSyntheticSource(width, height, framerate);
+    // 3. Initialize Audio Pipeline if enabled
+    if (this.options.enableAudio) {
+      this.audioPacketizer = new OpusRtpPacketizer({ payloadType: 111, clockRate: 48000 });
+      this.audioEncoder = new HardwareAudioEncoder((chunk) => {
+        if (!this.audioPacketizer) return;
+        const opusBytes = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(opusBytes);
+        const rtpPacket = this.audioPacketizer.packetize(opusBytes, chunk.timestamp);
+
+        if (this.audioDataChannel && this.audioDataChannel.readyState === 'open') {
+          try {
+            this.audioDataChannel.send(rtpPacket as any);
+            this.metrics.audioPacketsSent++;
+          } catch (err) {
+            console.warn('[LiveP2PSender] Audio send error:', err);
+          }
+        }
+      }, (err) => {
+        this.options.onError?.(new Error(`AudioEncoder Error: ${err.message}`));
+      });
+
+      await this.audioEncoder.configure({
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: this.options.audioBitrate || 64000,
+      });
+
+      if (audioTrack && typeof (window as any).MediaStreamTrackProcessor !== 'undefined') {
+        this.startAudioTrackProcessor(audioTrack);
+      } else {
+        this.startSyntheticAudioSource();
+      }
     }
 
-    // 4. Start periodic telemetry
+    // 4. Start Video Source (MediaTrack or Synthetic Animation)
+    if (mediaTrack && typeof (window as any).MediaStreamTrackProcessor !== 'undefined') {
+      this.startVideoTrackProcessor(mediaTrack);
+    } else {
+      this.startSyntheticVideoSource(width, height, framerate);
+    }
+
+    // 5. Start periodic telemetry
     this.startTelemetryLoop();
 
-    // 5. Announce presence to any waiting receivers in the room
+    // 6. Announce presence to any waiting receivers
     await this.options.signaling.sendMessage({
       type: 'join',
       roomId: this.options.roomId,
@@ -213,10 +266,18 @@ export class LiveP2PSender {
       clearInterval(this.animTimerId);
       this.animTimerId = null;
     }
+    if (this.audioTimerId) {
+      clearInterval(this.audioTimerId);
+      this.audioTimerId = null;
+    }
 
-    if (this.dataChannel) {
-      this.dataChannel.close();
-      this.dataChannel = null;
+    if (this.videoDataChannel) {
+      this.videoDataChannel.close();
+      this.videoDataChannel = null;
+    }
+    if (this.audioDataChannel) {
+      this.audioDataChannel.close();
+      this.audioDataChannel = null;
     }
 
     if (this.pc) {
@@ -224,9 +285,13 @@ export class LiveP2PSender {
       this.pc = null;
     }
 
-    if (this.encoder) {
-      this.encoder.close();
-      this.encoder = null;
+    if (this.videoEncoder) {
+      this.videoEncoder.close();
+      this.videoEncoder = null;
+    }
+    if (this.audioEncoder) {
+      this.audioEncoder.close();
+      this.audioEncoder = null;
     }
 
     this.captureCanvas = null;
@@ -260,27 +325,25 @@ export class LiveP2PSender {
       }
     };
 
-    // Create low-latency unreliable/unordered RTCDataChannel for RTP stream
-    this.dataChannel = this.pc.createDataChannel('video-stream', {
+    // 1. Create Video DataChannel (unreliable/unordered for lowest latency)
+    this.videoDataChannel = this.pc.createDataChannel('video-stream', {
       ordered: false,
       maxRetransmits: 0,
     });
-    this.dataChannel.binaryType = 'arraybuffer';
+    this.videoDataChannel.binaryType = 'arraybuffer';
 
-    this.dataChannel.onopen = () => {
-      if (this.dataChannel) {
-        this.metrics.dataChannelState = this.dataChannel.readyState;
+    this.videoDataChannel.onopen = () => {
+      if (this.videoDataChannel) {
+        this.metrics.dataChannelState = this.videoDataChannel.readyState;
       }
-      // Trigger an immediate keyframe when the channel opens so viewer gets instant picture
       this.requestKeyframe();
     };
 
-    this.dataChannel.onclose = () => {
+    this.videoDataChannel.onclose = () => {
       this.metrics.dataChannelState = 'closed';
     };
 
-    this.dataChannel.onmessage = (event) => {
-      // Reverse feedback from viewer: PLI / latency telemetry
+    this.videoDataChannel.onmessage = (event) => {
       try {
         if (typeof event.data === 'string') {
           const data = JSON.parse(event.data);
@@ -289,9 +352,28 @@ export class LiveP2PSender {
           }
         }
       } catch {
-        // non-json message
+        // ignore
       }
     };
+
+    // 2. Create Audio DataChannel (light protection against pops/clicks)
+    if (this.options.enableAudio) {
+      this.audioDataChannel = this.pc.createDataChannel('audio-stream', {
+        ordered: false,
+        maxRetransmits: 1,
+      });
+      this.audioDataChannel.binaryType = 'arraybuffer';
+
+      this.audioDataChannel.onopen = () => {
+        if (this.audioDataChannel) {
+          this.metrics.audioDataChannelState = this.audioDataChannel.readyState;
+        }
+      };
+
+      this.audioDataChannel.onclose = () => {
+        this.metrics.audioDataChannelState = 'closed';
+      };
+    }
 
     // Create and send SDP Offer
     const offer = await this.pc.createOffer();
@@ -305,7 +387,7 @@ export class LiveP2PSender {
     });
   }
 
-  private startTrackProcessor(track: MediaStreamTrack): void {
+  private startVideoTrackProcessor(track: MediaStreamTrack): void {
     const processor = new (window as any).MediaStreamTrackProcessor({ track });
     const reader = processor.readable.getReader();
 
@@ -318,15 +400,68 @@ export class LiveP2PSender {
         const keyFrame = this.forceNextKeyframe;
         this.forceNextKeyframe = false;
 
-        this.encoder?.encode(frame, { keyFrame });
-        frame.close(); // Zero VRAM leak
+        this.videoEncoder?.encode(frame, { keyFrame });
+        frame.close();
       }
     };
 
     readLoop().catch((err) => this.options.onError?.(err));
   }
 
-  private startSyntheticSource(width: number, height: number, framerate: number): void {
+  private startAudioTrackProcessor(track: MediaStreamTrack): void {
+    const processor = new (window as any).MediaStreamTrackProcessor({ track });
+    const reader = processor.readable.getReader();
+
+    const readLoop = async () => {
+      while (this.isRunning && this.audioEncoder) {
+        const { done, value } = await reader.read();
+        if (done || !value) break;
+
+        const audioData: AudioData = value;
+        this.audioEncoder.encode(audioData);
+        audioData.close();
+      }
+    };
+
+    readLoop().catch((err) => this.options.onError?.(err));
+  }
+
+  private startSyntheticAudioSource(): void {
+    let audioSampleIndex = 0;
+    let audioPtsUs = 0;
+    const samplesPerFrame = 960; // 20ms @ 48kHz (standard Opus frame)
+    const intervalMs = 20;
+
+    this.audioTimerId = setInterval(() => {
+      if (!this.isRunning || !this.audioEncoder) return;
+
+      // Generate 440Hz sine tone (Stereo float32 interleaved)
+      const pcmData = new Float32Array(samplesPerFrame * 2);
+      for (let i = 0; i < samplesPerFrame; i++) {
+        const t = (audioSampleIndex + i) / 48000;
+        const sample = Math.sin(2 * Math.PI * 440 * t) * 0.25;
+        pcmData[i * 2] = sample;     // Left
+        pcmData[i * 2 + 1] = sample; // Right
+      }
+
+      const audioData = new AudioData({
+        format: 'f32',
+        sampleRate: 48000,
+        numberOfFrames: samplesPerFrame,
+        numberOfChannels: 2,
+        timestamp: audioPtsUs,
+        data: pcmData,
+      });
+
+      this.audioEncoder.encode(audioData);
+      audioData.close();
+
+      audioSampleIndex += samplesPerFrame;
+      audioPtsUs += 20000; // 20ms in µs
+    }, intervalMs);
+  }
+
+  private startSyntheticVideoSource(width: number, height: number, framerate: number): void {
     this.captureCanvas = document.createElement('canvas');
     this.captureCanvas.width = width;
     this.captureCanvas.height = height;
@@ -346,12 +481,12 @@ export class LiveP2PSender {
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, w, h);
 
-      // Moving scanning bar
+      // Scanning bar
       const barX = (frameIndex * 8) % w;
       ctx.fillStyle = '#38bdf8';
       ctx.fillRect(barX, 0, 16, h);
 
-      // Rotating radar circle
+      // Rotating radar
       const angle = (frameIndex * 0.1) % (Math.PI * 2);
       ctx.strokeStyle = '#34d399';
       ctx.lineWidth = 4;
@@ -364,11 +499,21 @@ export class LiveP2PSender {
       ctx.lineTo(w / 2 + Math.cos(angle) * 50, h / 2 + Math.sin(angle) * 50);
       ctx.stroke();
 
-      // Text overlay
+      // Audio beat visualizer pulse
+      if (this.options.enableAudio) {
+        ctx.fillStyle = (frameIndex % 30 < 15) ? '#e11d48' : '#475569';
+        ctx.beginPath();
+        ctx.arc(w - 40, 40, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '10px monospace';
+        ctx.fillText('AUDIO', w - 55, 43);
+      }
+
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 18px monospace';
       ctx.fillText(`WebRTC P2P Sender | Frame: ${frameIndex}`, 20, 40);
-      ctx.fillText(`Room: ${this.options.roomId} | Sent: ${this.metrics.rtpPacketsSent}`, 20, 70);
+      ctx.fillText(`Room: ${this.options.roomId} | Video: ${this.metrics.rtpPacketsSent} | Audio: ${this.metrics.audioPacketsSent}`, 20, 70);
 
       const frame = new VideoFrame(this.captureCanvas, {
         timestamp: ptsUs,
@@ -377,8 +522,8 @@ export class LiveP2PSender {
       const keyFrame = this.forceNextKeyframe || (frameIndex % 60 === 0);
       this.forceNextKeyframe = false;
 
-      this.encoder?.encode(frame, { keyFrame });
-      frame.close(); // Zero VRAM leak
+      this.videoEncoder?.encode(frame, { keyFrame });
+      frame.close();
 
       frameIndex++;
     }, intervalMs);
@@ -469,7 +614,7 @@ export class LiveP2PSender {
         packet[13] = fuHeader;
         packet.set(rawData.subarray(off, end), 14);
 
-        this.sendPacket(packet);
+        this.sendVideoPacket(packet);
         off = end;
       }
     }
@@ -479,14 +624,14 @@ export class LiveP2PSender {
     const packet = new Uint8Array(12 + nal.length);
     this.writeRtpHeader(packet, marker, timestampUs);
     packet.set(nal, 12);
-    this.sendPacket(packet);
+    this.sendVideoPacket(packet);
   }
 
   private writeRtpHeader(out: Uint8Array, marker: boolean, timestampUs: number): void {
     const ts90k = Math.floor((timestampUs * 90) / 1000) >>> 0;
 
-    out[0] = 0x80; // V=2
-    out[1] = (marker ? 0x80 : 0x00) | 96; // PT=96
+    out[0] = 0x80;
+    out[1] = (marker ? 0x80 : 0x00) | 96;
     out[2] = (this.rtpSeq >> 8) & 0xff;
     out[3] = this.rtpSeq & 0xff;
     out[4] = (ts90k >> 24) & 0xff;
@@ -502,12 +647,12 @@ export class LiveP2PSender {
     this.metrics.rtpPacketsSent++;
   }
 
-  private sendPacket(packet: Uint8Array): void {
-    if (this.dataChannel && this.dataChannel.readyState === 'open') {
+  private sendVideoPacket(packet: Uint8Array): void {
+    if (this.videoDataChannel && this.videoDataChannel.readyState === 'open') {
       try {
-        this.dataChannel.send(packet as any);
+        this.videoDataChannel.send(packet as any);
       } catch (err) {
-        console.warn('[LiveP2PSender] DataChannel buffer full or send error:', err);
+        console.warn('[LiveP2PSender] Video DataChannel send error:', err);
       }
     }
   }
@@ -538,33 +683,44 @@ export class LiveP2PSender {
 
 /**
  * LiveP2PReceiver:
- * Receives WebRTC DataChannel RTP stream, demuxes with FAIL-09 defense, decodes via WebCodecs, and renders.
+ * Receives Video + Audio streams over WebRTC DataChannels, decodes, and synchronizes with MasterClockSync Lip-Sync.
  */
 export class LiveP2PReceiver {
   private options: P2PReceiverOptions;
   public peerId: string;
   private pc: RTCPeerConnection | null = null;
-  private dataChannel: RTCDataChannel | null = null;
-  private decoder: HardwareVideoDecoder | null = null;
-  private demuxer: RtpStreamDemuxer | null = null;
-  private isRunning: boolean = false;
+  private videoDataChannel: RTCDataChannel | null = null;
+  private audioDataChannel: RTCDataChannel | null = null;
 
-  // Keyframe & recovery state
+  // Video Pipeline
+  private videoDecoder: HardwareVideoDecoder | null = null;
+  private videoDemuxer: RtpStreamDemuxer | null = null;
   private hasReceivedFirstKeyframe: boolean = false;
   private waitingForPliRecoveryKeyframe: boolean = false;
   private decoderConfiguredWithDescription: boolean = false;
 
-  // Latency & metrics
+  // Audio Pipeline & Lip-Sync
+  private audioDecoder: HardwareAudioDecoder | null = null;
+  private audioDemuxer: OpusRtpDemuxer | null = null;
+  private audioPlayer: WebAudioLivePlayer | null = null;
+  private masterClock: MasterClockSync | null = null;
+
+  private isRunning: boolean = false;
   private decodedFramesCount: number = 0;
   private lastStatsTime: number = 0;
+
   private metrics: P2PReceiverMetrics = {
     connectionState: 'new',
     dataChannelState: 'closed',
+    audioDataChannelState: 'closed',
     playoutFps: 0,
     rtpPacketsReceived: 0,
+    audioPacketsReceived: 0,
     packetsDropped: 0,
     fail09Rescues: 0,
     glassToGlassLatencyMs: 0,
+    avDriftMs: 0,
+    lipSyncStatus: 'NO_AUDIO',
     isRunning: false,
   };
 
@@ -586,12 +742,30 @@ export class LiveP2PReceiver {
     this.metrics.isRunning = true;
     this.lastStatsTime = performance.now();
 
-    // 1. Initialize RTP Demuxer with FAIL-09/FAIL-10 defense
-    this.demuxer = new RtpStreamDemuxer({ isHevc: false, clockRate: 90000 });
+    // 1. Initialize Video Pipeline
+    this.videoDemuxer = new RtpStreamDemuxer({ isHevc: false, clockRate: 90000 });
 
-    // 2. Initialize Hardware VideoDecoder
-    this.decoder = new HardwareVideoDecoder((frame, _meta) => {
+    this.videoDecoder = new HardwareVideoDecoder((frame, _meta) => {
       this.decodedFramesCount++;
+
+      // Evaluate Lip-Sync Drift against Master Audio Clock
+      if (this.masterClock && this.options.enableAudio) {
+        if (this.masterClock.hasAudio) {
+          const sync = this.masterClock.evaluateFrameSync(frame.timestamp);
+          this.metrics.avDriftMs = Math.round(sync.driftMs);
+
+          if (Math.abs(sync.driftMs) <= 40) {
+            this.metrics.lipSyncStatus = 'LIP_SYNC_ALIGNED';
+          } else if (sync.driftMs < -40) {
+            this.metrics.lipSyncStatus = 'VIDEO_LAGGING';
+          } else {
+            this.metrics.lipSyncStatus = 'VIDEO_LEADING';
+          }
+        } else {
+          this.metrics.avDriftMs = 0;
+          this.metrics.lipSyncStatus = 'LIP_SYNC_ALIGNED';
+        }
+      }
 
       // Render to target canvas
       if (this.options.renderCanvas) {
@@ -601,16 +775,45 @@ export class LiveP2PReceiver {
         }
       }
 
-      // Zero VRAM leak: synchronously close frame
+      // Zero VRAM leak invariant
       frame.close();
     }, (err) => {
       this.options.onError?.(err);
     });
 
-    await this.decoder.configure({
+    await this.videoDecoder.configure({
       codec: 'avc1.42001f',
       hardwareAcceleration: 'prefer-hardware',
     });
+
+    // 2. Initialize Audio Pipeline if enabled
+    if (this.options.enableAudio) {
+      this.audioDemuxer = new OpusRtpDemuxer({ clockRate: 48000 });
+      this.audioPlayer = new WebAudioLivePlayer({ sampleRate: 48000, numberOfChannels: 2 });
+      const audioCtx = this.audioPlayer.ensureContext();
+      this.masterClock = new MasterClockSync({ tightThresholdMs: 40, catchupThresholdMs: 500 }, audioCtx);
+
+      this.audioDecoder = new HardwareAudioDecoder((audioData) => {
+        if (this.audioPlayer) {
+          const pts = audioData.timestamp;
+          const scheduledTime = this.audioPlayer.enqueueAudioData(audioData);
+          this.masterClock?.updateAudioClock(pts, scheduledTime);
+          if (this.metrics.lipSyncStatus === 'NO_AUDIO') {
+            this.metrics.lipSyncStatus = 'LIP_SYNC_ALIGNED';
+          }
+        } else {
+          audioData.close();
+        }
+      }, (err) => {
+        this.options.onError?.(new Error(`AudioDecoder Error: ${err.message}`));
+      });
+
+      await this.audioDecoder.configure({
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+      });
+    }
 
     // 3. Connect signaling and register offer/candidate listeners
     await this.options.signaling.connect();
@@ -635,7 +838,7 @@ export class LiveP2PReceiver {
     // 4. Start periodic telemetry
     this.startTelemetryLoop();
 
-    // 5. Send join message to trigger sender to produce an offer
+    // 5. Send join message
     await this.options.signaling.sendMessage({
       type: 'join',
       roomId: this.options.roomId,
@@ -644,10 +847,9 @@ export class LiveP2PReceiver {
   }
 
   public requestKeyframe(): void {
-    // Send reverse feedback: PLI over DataChannel (fastest) and signaling (fallback)
-    if (this.dataChannel && this.dataChannel.readyState === 'open') {
+    if (this.videoDataChannel && this.videoDataChannel.readyState === 'open') {
       try {
-        this.dataChannel.send(JSON.stringify({ type: 'pli' }));
+        this.videoDataChannel.send(JSON.stringify({ type: 'pli' }));
       } catch {
         // ignore
       }
@@ -663,9 +865,13 @@ export class LiveP2PReceiver {
     this.isRunning = false;
     this.metrics.isRunning = false;
 
-    if (this.dataChannel) {
-      this.dataChannel.close();
-      this.dataChannel = null;
+    if (this.videoDataChannel) {
+      this.videoDataChannel.close();
+      this.videoDataChannel = null;
+    }
+    if (this.audioDataChannel) {
+      this.audioDataChannel.close();
+      this.audioDataChannel = null;
     }
 
     if (this.pc) {
@@ -673,12 +879,22 @@ export class LiveP2PReceiver {
       this.pc = null;
     }
 
-    if (this.decoder) {
-      this.decoder.close();
-      this.decoder = null;
+    if (this.videoDecoder) {
+      this.videoDecoder.close();
+      this.videoDecoder = null;
+    }
+    if (this.audioDecoder) {
+      this.audioDecoder.close();
+      this.audioDecoder = null;
+    }
+    if (this.audioPlayer) {
+      this.audioPlayer.close();
+      this.audioPlayer = null;
     }
 
-    this.demuxer = null;
+    this.videoDemuxer = null;
+    this.audioDemuxer = null;
+    this.masterClock = null;
     this.decoderConfiguredWithDescription = false;
     this.hasReceivedFirstKeyframe = false;
     this.waitingForPliRecoveryKeyframe = false;
@@ -713,27 +929,50 @@ export class LiveP2PReceiver {
     };
 
     this.pc.ondatachannel = (event) => {
-      this.dataChannel = event.channel;
-      this.dataChannel.binaryType = 'arraybuffer';
+      const channel = event.channel;
 
-      this.dataChannel.onopen = () => {
-        if (this.dataChannel) {
-          this.metrics.dataChannelState = this.dataChannel.readyState;
-        }
-        // Send immediate PLI on open to ensure keyframe is dispatched
-        this.requestKeyframe();
-      };
+      if (channel.label === 'video-stream') {
+        this.videoDataChannel = channel;
+        this.videoDataChannel.binaryType = 'arraybuffer';
 
-      this.dataChannel.onclose = () => {
-        this.metrics.dataChannelState = 'closed';
-      };
+        this.videoDataChannel.onopen = () => {
+          if (this.videoDataChannel) {
+            this.metrics.dataChannelState = this.videoDataChannel.readyState;
+          }
+          this.requestKeyframe();
+        };
 
-      this.dataChannel.onmessage = (msgEvent) => {
-        if (msgEvent.data instanceof ArrayBuffer) {
-          const packet = new Uint8Array(msgEvent.data);
-          this.handleRtpPacket(packet);
-        }
-      };
+        this.videoDataChannel.onclose = () => {
+          this.metrics.dataChannelState = 'closed';
+        };
+
+        this.videoDataChannel.onmessage = (msgEvent) => {
+          if (msgEvent.data instanceof ArrayBuffer) {
+            const packet = new Uint8Array(msgEvent.data);
+            this.handleVideoRtpPacket(packet);
+          }
+        };
+      } else if (channel.label === 'audio-stream') {
+        this.audioDataChannel = channel;
+        this.audioDataChannel.binaryType = 'arraybuffer';
+
+        this.audioDataChannel.onopen = () => {
+          if (this.audioDataChannel) {
+            this.metrics.audioDataChannelState = this.audioDataChannel.readyState;
+          }
+        };
+
+        this.audioDataChannel.onclose = () => {
+          this.metrics.audioDataChannelState = 'closed';
+        };
+
+        this.audioDataChannel.onmessage = (msgEvent) => {
+          if (msgEvent.data instanceof ArrayBuffer) {
+            const packet = new Uint8Array(msgEvent.data);
+            this.handleAudioRtpPacket(packet);
+          }
+        };
+      }
     };
 
     await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -749,16 +988,33 @@ export class LiveP2PReceiver {
     });
   }
 
-  private handleRtpPacket(packet: Uint8Array): void {
-    if (!this.demuxer || !this.decoder) return;
+  private handleAudioRtpPacket(packet: Uint8Array): void {
+    if (!this.audioDemuxer || !this.audioDecoder) return;
+
+    const assembled: AssembledOpusPacket | null = this.audioDemuxer.pushPacket(packet);
+    if (assembled) {
+      this.metrics.audioPacketsReceived++;
+
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: assembled.ptsUs,
+        data: assembled.payload,
+      });
+
+      this.audioDecoder.decode(chunk);
+    }
+  }
+
+  private handleVideoRtpPacket(packet: Uint8Array): void {
+    if (!this.videoDemuxer || !this.videoDecoder) return;
 
     this.metrics.rtpPacketsReceived++;
 
-    const prevFragmentLossEvents = this.demuxer.getStats().fragmentLossEvents;
-    const prevPacketsDropped = this.demuxer.getStats().packetsDropped;
-    const assembledFrame: AssembledRtpFrame | null = this.demuxer.pushPacket(packet);
-    const newFragmentLossEvents = this.demuxer.getStats().fragmentLossEvents;
-    const newPacketsDropped = this.demuxer.getStats().packetsDropped;
+    const prevFragmentLossEvents = this.videoDemuxer.getStats().fragmentLossEvents;
+    const prevPacketsDropped = this.videoDemuxer.getStats().packetsDropped;
+    const assembledFrame: AssembledRtpFrame | null = this.videoDemuxer.pushPacket(packet);
+    const newFragmentLossEvents = this.videoDemuxer.getStats().fragmentLossEvents;
+    const newPacketsDropped = this.videoDemuxer.getStats().packetsDropped;
 
     // FAIL-09 Self-Healing Check
     if (newFragmentLossEvents > prevFragmentLossEvents || newPacketsDropped > prevPacketsDropped) {
@@ -769,11 +1025,10 @@ export class LiveP2PReceiver {
     }
 
     if (assembledFrame) {
-      // Reconfigure decoder with AVCDecoderConfigurationRecord description as soon as SPS/PPS arrives
       if (!this.decoderConfiguredWithDescription) {
-        const desc = this.demuxer.getAvcDescription();
+        const desc = this.videoDemuxer.getAvcDescription();
         if (desc) {
-          this.decoder.configure({
+          this.videoDecoder.configure({
             codec: 'avc1.42001f',
             description: desc,
             hardwareAcceleration: 'prefer-hardware',
@@ -782,7 +1037,6 @@ export class LiveP2PReceiver {
         }
       }
 
-      // FAIL-01 & FAIL-09 Defense: Never feed orphaned delta frames or keyframes without parameter sets to decoder
       if (assembledFrame.isKeyframe) {
         if (!this.decoderConfiguredWithDescription) {
           this.requestKeyframe();
@@ -794,7 +1048,6 @@ export class LiveP2PReceiver {
         return;
       }
 
-      // Reconstruct AVCC format
       let totalSize = 0;
       for (const nal of assembledFrame.nals) {
         totalSize += 4 + nal.length;
@@ -817,7 +1070,7 @@ export class LiveP2PReceiver {
         data: avccBytes,
       });
 
-      this.decoder.decodeChunk(chunk);
+      this.videoDecoder.decodeChunk(chunk);
     }
   }
 

@@ -5,3 +5,5 @@ export * from './rtp-demuxer';
 export * from './loopback';
 export * from './p2p-signaling';
 export * from './p2p-session';
+export * from './opus-rtp';
+export * from './audio-player';
