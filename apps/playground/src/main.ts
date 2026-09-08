@@ -1,7 +1,14 @@
-import { WebFfmpegEngine, WebFfmpegTranscoder, SimpleMp4Demuxer, WebGpuComputeEngine } from '@web-ffmpeg-gpu/core';
+import {
+  WebFfmpegEngine,
+  WebFfmpegTranscoder,
+  SimpleMp4Demuxer,
+  WebGpuComputeEngine,
+  LiveLoopbackSession,
+} from '@web-ffmpeg-gpu/core';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
+(window as any).LiveLoopbackSession = LiveLoopbackSession;
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -45,6 +52,20 @@ const statCompression = document.getElementById('stat-compression') as HTMLSpanE
 const btnDownloadMp4 = document.getElementById('btn-download-mp4') as HTMLButtonElement;
 const transcodedVideoPreview = document.getElementById('transcoded-video-preview') as HTMLVideoElement;
 const boxTreeContent = document.getElementById('box-tree-content') as HTMLDivElement;
+
+// RTC Live Loopback Elements
+const btnToggleRtc = document.getElementById('btn-toggle-rtc') as HTMLButtonElement;
+const btnRtcPli = document.getElementById('btn-rtc-pli') as HTMLButtonElement;
+const sliderRtcLoss = document.getElementById('slider-rtc-loss') as HTMLInputElement;
+const sliderRtcJitter = document.getElementById('slider-rtc-jitter') as HTMLInputElement;
+const valRtcLoss = document.getElementById('val-rtc-loss') as HTMLSpanElement;
+const valRtcJitter = document.getElementById('val-rtc-jitter') as HTMLSpanElement;
+const metricRtcLatency = document.getElementById('metric-rtc-latency') as HTMLSpanElement;
+const metricRtcFps = document.getElementById('metric-rtc-fps') as HTMLSpanElement;
+const metricRtcPackets = document.getElementById('metric-rtc-packets') as HTMLSpanElement;
+const metricRtcRescues = document.getElementById('metric-rtc-rescues') as HTMLSpanElement;
+
+let rtcSession: LiveLoopbackSession | null = null;
 
 // State
 let engine: WebFfmpegEngine | null = null;
@@ -197,6 +218,71 @@ function setupEventListeners() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    });
+
+    // RTC Live Loopback Handlers
+    sliderRtcLoss.addEventListener('input', () => {
+      valRtcLoss.textContent = `${sliderRtcLoss.value}%`;
+      rtcSession?.setImpairments({ packetLossRate: Number(sliderRtcLoss.value) / 100 });
+    });
+
+    sliderRtcJitter.addEventListener('input', () => {
+      valRtcJitter.textContent = `${sliderRtcJitter.value} ms`;
+      rtcSession?.setImpairments({ jitterMs: Number(sliderRtcJitter.value) });
+    });
+
+    btnRtcPli.addEventListener('click', () => {
+      rtcSession?.requestKeyframe();
+    });
+
+    btnToggleRtc.addEventListener('click', async () => {
+      if (rtcSession) {
+        rtcSession.stop();
+        rtcSession = null;
+        btnToggleRtc.textContent = '▶ 启动 RTC 实时环回';
+        btnToggleRtc.className = 'btn btn-primary';
+        btnRtcPli.disabled = true;
+        return;
+      }
+
+      try {
+        emptyState.style.display = 'none';
+        btnToggleRtc.disabled = true;
+        btnToggleRtc.textContent = '初始化 RTC 编解码器...';
+
+        rtcSession = new LiveLoopbackSession({
+          width: 640,
+          height: 360,
+          framerate: 30,
+          bitrate: 1_200_000,
+          packetLossRate: Number(sliderRtcLoss.value) / 100,
+          jitterMs: Number(sliderRtcJitter.value),
+          renderCanvas: canvas,
+          onMetrics: (m) => {
+            metricRtcLatency.textContent = `${m.glassToGlassLatencyMs} ms`;
+            metricRtcFps.textContent = `${m.ingestFps} / ${m.playoutFps} FPS`;
+            const lossPct = m.rtpPacketsSent > 0 ? ((m.rtpPacketsDropped / m.rtpPacketsSent) * 100).toFixed(1) : '0.0';
+            metricRtcPackets.textContent = `${m.rtpPacketsSent} / ${m.rtpPacketsDropped} (丢 ${lossPct}%)`;
+            metricRtcRescues.textContent = `${m.fail09Rescues} 次 (PLI ${m.keyframeRequests})`;
+          },
+          onError: (err) => {
+            console.error('RTC Session Error:', err);
+          },
+        });
+
+        await rtcSession.start();
+        btnToggleRtc.textContent = '⏹ 停止 RTC 环回';
+        btnToggleRtc.className = 'btn btn-danger';
+        btnToggleRtc.disabled = false;
+        btnRtcPli.disabled = false;
+      } catch (err: any) {
+        console.error('Failed to start RTC Loopback:', err);
+        alert(`启动 RTC 实时环回失败: ${err.message || err}`);
+        btnToggleRtc.textContent = '▶ 启动 RTC 实时环回';
+        btnToggleRtc.className = 'btn btn-primary';
+        btnToggleRtc.disabled = false;
+        rtcSession = null;
+      }
     });
   }
 

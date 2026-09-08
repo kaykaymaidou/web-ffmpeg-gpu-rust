@@ -172,6 +172,56 @@
           <button class="btn btn-secondary btn-block" id="btn-reset-filters">重置滤镜参数</button>
         </div>
 
+        <!-- RTC Live Loopback & Self-Healing Cockpit Card -->
+        <div class="card live-card">
+          <div class="card-title">
+            <span>📡 RTC 实时自转码环回与弱网自愈舱</span>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button class="btn btn-primary" id="btn-toggle-rtc" style="flex: 1;">▶ 启动 RTC 实时环回</button>
+            <button class="btn btn-secondary" id="btn-rtc-pli" disabled style="flex: 1;">⚡ 触发 PLI 关键帧</button>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <span>弱网丢包率 (Packet Loss)</span>
+              <span id="val-rtc-loss" style="color: #f87171; font-weight: bold;">0%</span>
+            </div>
+            <input type="range" id="slider-rtc-loss" min="0" max="40" step="5" value="0" />
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <span>网络抖动时延 (Jitter)</span>
+              <span id="val-rtc-jitter" style="color: #fbbf24; font-weight: bold;">0 ms</span>
+            </div>
+            <input type="range" id="slider-rtc-jitter" min="0" max="150" step="10" value="0" />
+          </div>
+
+          <div class="transcode-stats" style="margin-top: 8px;">
+            <div class="stat-item">
+              <span class="stat-title">端到端时延 (Glass-to-Glass)</span>
+              <span class="stat-val text-success" id="metric-rtc-latency">0 ms</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">实时编/解码帧率</span>
+              <span class="stat-val" id="metric-rtc-fps">0 / 0 FPS</span>
+            </div>
+          </div>
+
+          <div class="transcode-stats" style="margin-top: 6px;">
+            <div class="stat-item">
+              <span class="stat-title">RTP 封包 发送 / 丢失</span>
+              <span class="stat-val" id="metric-rtc-packets">0 / 0</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">FAIL-09 熔断自愈</span>
+              <span class="stat-val" id="metric-rtc-rescues" style="color: #38bdf8;">0 次</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Architecture Principle Card -->
         <div class="card principle-card">
           <div class="card-title">

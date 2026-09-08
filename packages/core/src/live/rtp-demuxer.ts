@@ -45,7 +45,9 @@ export class RtpStreamDemuxer {
   private fuExpectedSeq: number = 0;
   private fuInProgress: boolean = false;
   private fuHasGap: boolean = false;
-  private hasKeyframe: boolean = false;
+  private currentFrameTimestamp: number = -1;
+  private cachedSps: Uint8Array | null = null;
+  private cachedPps: Uint8Array | null = null;
 
   // RFC 3550 Appendix A.1 Sequence Unroller
   private maxSeq: number = 0;
@@ -73,6 +75,35 @@ export class RtpStreamDemuxer {
 
   public getStats(): RtpDemuxerStats {
     return { ...this.stats };
+  }
+
+  /**
+   * Build AVCDecoderConfigurationRecord (ISO/IEC 14496-15) from cached SPS and PPS.
+   */
+  public getAvcDescription(): Uint8Array | null {
+    if (!this.cachedSps || !this.cachedPps) return null;
+    const sps = this.cachedSps;
+    const pps = this.cachedPps;
+    const desc = new Uint8Array(11 + sps.length + pps.length);
+    desc[0] = 1; // configurationVersion
+    desc[1] = sps[1]; // profile
+    desc[2] = sps[2]; // profile_compatibility
+    desc[3] = sps[3]; // level
+    desc[4] = 0xff; // 4-byte length prefix (lengthSizeMinusOne = 3)
+    desc[5] = 0xe1; // numOfSequenceParameterSets = 1
+    desc[6] = (sps.length >> 8) & 0xff;
+    desc[7] = sps.length & 0xff;
+    desc.set(sps, 8);
+    const ppsOffset = 8 + sps.length;
+    desc[ppsOffset] = 1; // numOfPictureParameterSets = 1
+    desc[ppsOffset + 1] = (pps.length >> 8) & 0xff;
+    desc[ppsOffset + 2] = pps.length & 0xff;
+    desc.set(pps, ppsOffset + 3);
+    return desc;
+  }
+
+  public getCachedParameterSets(): { sps: Uint8Array | null; pps: Uint8Array | null } {
+    return { sps: this.cachedSps, pps: this.cachedPps };
   }
 
   /**
@@ -206,6 +237,19 @@ export class RtpStreamDemuxer {
     this.unrollSequence(header.sequenceNumber);
     const ptsUs = this.toPtsUs(header.timestamp);
 
+    // Frame boundary isolation: if timestamp jumps, any previous uncompleted frame was severed by packet loss
+    if (this.currentFrameTimestamp !== -1 && header.timestamp !== this.currentFrameTimestamp) {
+      if (this.currentNals.length > 0) {
+        this.stats.packetsDropped += this.currentNals.length;
+        this.stats.fragmentLossEvents += 1;
+        this.currentNals = [];
+      }
+      this.fuBuffer = [];
+      this.fuInProgress = false;
+      this.fuHasGap = false;
+    }
+    this.currentFrameTimestamp = header.timestamp;
+
     if (payload.length === 0) {
       return null;
     }
@@ -219,14 +263,58 @@ export class RtpStreamDemuxer {
     if (header.marker && this.currentNals.length > 0) {
       const nals = this.currentNals;
       this.currentNals = [];
+
+      // Check if there is any VCL slice in this frame
+      const hasVcl = !this.isHevc
+        ? nals.some(nal => {
+            if (nal.length < 1) return false;
+            const t = nal[0] & 0x1f;
+            return t >= 1 && t <= 5;
+          })
+        : nals.some(nal => {
+            if (nal.length < 2) return false;
+            const t = (nal[0] >> 1) & 0x3f;
+            return t <= 31;
+          });
+
+      if (!hasVcl) {
+        // Non-VCL only (e.g. standalone parameter sets) cannot be decoded as an individual frame
+        return null;
+      }
+
+      // Check if it's an IDR keyframe
+      const isKeyframe = !this.isHevc
+        ? nals.some(nal => nal.length > 0 && (nal[0] & 0x1f) === 5)
+        : nals.some(nal => {
+            if (nal.length < 2) return false;
+            const t = (nal[0] >> 1) & 0x3f;
+            return t >= 19 && t <= 21;
+          });
+
+      // If keyframe and missing parameter sets, inject cached SPS/PPS
+      if (!this.isHevc && isKeyframe) {
+        const hasSps = nals.some(nal => nal.length > 0 && (nal[0] & 0x1f) === 7);
+        const hasPps = nals.some(nal => nal.length > 0 && (nal[0] & 0x1f) === 8);
+        if (!hasSps && this.cachedSps) {
+          nals.unshift(this.cachedSps);
+        }
+        if (!hasPps && this.cachedPps) {
+          const spsIdx = nals.findIndex(nal => nal.length > 0 && (nal[0] & 0x1f) === 7);
+          if (spsIdx >= 0) {
+            nals.splice(spsIdx + 1, 0, this.cachedPps);
+          } else {
+            nals.unshift(this.cachedPps);
+          }
+        }
+      }
+
       const frame: AssembledRtpFrame = {
         nals,
         ptsUs,
-        isKeyframe: this.hasKeyframe,
+        isKeyframe,
         ssrc: header.ssrc,
         marker: true,
       };
-      this.hasKeyframe = false;
       this.stats.framesAssembled += 1;
       return frame;
     }
@@ -252,8 +340,10 @@ export class RtpStreamDemuxer {
       case 11:
       case 12: {
         // Single NAL unit packet
-        if (nalType === 5 || nalType === 7 || nalType === 8) {
-          this.hasKeyframe = true;
+        if (nalType === 7) {
+          this.cachedSps = new Uint8Array(payload);
+        } else if (nalType === 8) {
+          this.cachedPps = new Uint8Array(payload);
         }
         this.currentNals.push(new Uint8Array(payload));
         break;
@@ -272,8 +362,10 @@ export class RtpStreamDemuxer {
           const nalu = payload.subarray(offset, offset + naluSize);
           if (nalu.length > 0) {
             const innerType = nalu[0] & 0x1f;
-            if (innerType === 5 || innerType === 7 || innerType === 8) {
-              this.hasKeyframe = true;
+            if (innerType === 7) {
+              this.cachedSps = new Uint8Array(nalu);
+            } else if (innerType === 8) {
+              this.cachedPps = new Uint8Array(nalu);
             }
             this.currentNals.push(new Uint8Array(nalu));
           }
@@ -300,10 +392,6 @@ export class RtpStreamDemuxer {
           this.fuExpectedSeq = (seq + 1) & 0xffff;
           this.fuInProgress = true;
           this.fuHasGap = false;
-
-          if (originalType === 5) {
-            this.hasKeyframe = true;
-          }
         } else if (this.fuInProgress) {
           // FAIL-09 Defense: detect fragment gap
           if (seq !== this.fuExpectedSeq) {
@@ -338,9 +426,6 @@ export class RtpStreamDemuxer {
 
     if (nalType <= 47) {
       // Single NAL
-      if ((nalType >= 19 && nalType <= 21) || (nalType >= 32 && nalType <= 34)) {
-        this.hasKeyframe = true;
-      }
       this.currentNals.push(new Uint8Array(payload));
     } else if (nalType === 48) {
       // AP
@@ -352,10 +437,6 @@ export class RtpStreamDemuxer {
         if (offset + naluSize > payload.length) break;
         const nalu = payload.subarray(offset, offset + naluSize);
         if (nalu.length >= 2) {
-          const innerType = (nalu[0] >> 1) & 0x3f;
-          if ((innerType >= 19 && innerType <= 21) || (innerType >= 32 && innerType <= 34)) {
-            this.hasKeyframe = true;
-          }
           this.currentNals.push(new Uint8Array(nalu));
         }
         offset += naluSize;
@@ -378,10 +459,6 @@ export class RtpStreamDemuxer {
         this.fuExpectedSeq = (seq + 1) & 0xffff;
         this.fuInProgress = true;
         this.fuHasGap = false;
-
-        if (originalType >= 19 && originalType <= 21) {
-          this.hasKeyframe = true;
-        }
       } else if (this.fuInProgress) {
         if (seq !== this.fuExpectedSeq) {
           this.fuHasGap = true;
