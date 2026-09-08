@@ -1,4 +1,5 @@
-export type FilterMode = 'none' | 'grayscale' | 'invert' | 'brightness_contrast' | 'sepia' | 'vignette';
+export type FilterMode = 'none' | 'grayscale' | 'invert' | 'brightness_contrast' | 'sepia' | 'vignette' | 'hdr_tonemap';
+
 
 export interface FilterSettings {
   mode: FilterMode;

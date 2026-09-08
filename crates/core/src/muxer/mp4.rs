@@ -1,12 +1,54 @@
 // Pure Rust MP4 Muxer with FastStart streaming order
 
+/// Video codec format in MP4 container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoCodec {
+    H264,
+    H265,
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoTrackConfig {
+    pub codec: VideoCodec,
     pub width: u32,
     pub height: u32,
     pub timescale: u32,
+    pub vps: Option<Vec<u8>>,
     pub sps: Vec<u8>,
     pub pps: Vec<u8>,
+}
+
+impl VideoTrackConfig {
+    pub fn new_h264(width: u32, height: u32, timescale: u32, sps: Vec<u8>, pps: Vec<u8>) -> Self {
+        Self {
+            codec: VideoCodec::H264,
+            width,
+            height,
+            timescale,
+            vps: None,
+            sps,
+            pps,
+        }
+    }
+
+    pub fn new_h265(
+        width: u32,
+        height: u32,
+        timescale: u32,
+        vps: Vec<u8>,
+        sps: Vec<u8>,
+        pps: Vec<u8>,
+    ) -> Self {
+        Self {
+            codec: VideoCodec::H265,
+            width,
+            height,
+            timescale,
+            vps: Some(vps),
+            sps,
+            pps,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +127,8 @@ impl RustMp4Muxer {
 
     /// Finalize and assemble the complete MP4 byte buffer with `faststart` (moov before mdat).
     pub fn finalize(&self) -> Vec<u8> {
-        let ftyp = build_ftyp();
+        let is_hevc = self.video_config.as_ref().map(|v| v.codec == VideoCodec::H265).unwrap_or(false);
+        let ftyp = build_ftyp(is_hevc);
         let ftyp_len = ftyp.len();
 
         // 1. Build moov with dummy zero offsets to measure exact moov byte length
@@ -262,14 +305,24 @@ fn write_box(tag: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     buf
 }
 
-fn build_ftyp() -> Vec<u8> {
+fn build_ftyp(is_hevc: bool) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(b"isom"); // major_brand
-    payload.extend_from_slice(&0x00000200u32.to_be_bytes()); // minor_version
-    payload.extend_from_slice(b"isom");
-    payload.extend_from_slice(b"iso2");
-    payload.extend_from_slice(b"avc1");
-    payload.extend_from_slice(b"mp41");
+    if is_hevc {
+        payload.extend_from_slice(b"isom"); // major_brand
+        payload.extend_from_slice(&0x00000200u32.to_be_bytes()); // minor_version
+        payload.extend_from_slice(b"isom");
+        payload.extend_from_slice(b"iso2");
+        payload.extend_from_slice(b"mp41");
+        payload.extend_from_slice(b"hevc");
+        payload.extend_from_slice(b"hvc1");
+    } else {
+        payload.extend_from_slice(b"isom"); // major_brand
+        payload.extend_from_slice(&0x00000200u32.to_be_bytes()); // minor_version
+        payload.extend_from_slice(b"isom");
+        payload.extend_from_slice(b"iso2");
+        payload.extend_from_slice(b"avc1");
+        payload.extend_from_slice(b"mp41");
+    }
     write_box(b"ftyp", &payload)
 }
 
@@ -388,34 +441,70 @@ fn build_dinf() -> Vec<u8> {
 }
 
 fn build_stsd_video(config: &VideoTrackConfig) -> Vec<u8> {
-    let mut avc1_payload = Vec::new();
-    avc1_payload.extend_from_slice(&[0u8; 6]); // reserved
-    avc1_payload.extend_from_slice(&1u16.to_be_bytes()); // data_reference_index = 1
-    avc1_payload.extend_from_slice(&0u16.to_be_bytes()); // pre_defined
-    avc1_payload.extend_from_slice(&0u16.to_be_bytes()); // reserved
-    avc1_payload.extend_from_slice(&[0u8; 12]); // pre_defined [0; 3]
-    avc1_payload.extend_from_slice(&(config.width as u16).to_be_bytes());
-    avc1_payload.extend_from_slice(&(config.height as u16).to_be_bytes());
-    avc1_payload.extend_from_slice(&0x00480000u32.to_be_bytes()); // horizresolution 72 dpi
-    avc1_payload.extend_from_slice(&0x00480000u32.to_be_bytes()); // vertresolution 72 dpi
-    avc1_payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
-    avc1_payload.extend_from_slice(&1u16.to_be_bytes()); // frame_count = 1
-    avc1_payload.extend_from_slice(&[0u8; 32]); // compressorname (32 zero bytes)
-    avc1_payload.extend_from_slice(&0x0018u16.to_be_bytes()); // depth = 24
-    avc1_payload.extend_from_slice(&0xFFFFu16.to_be_bytes()); // pre_defined = -1
+    match config.codec {
+        VideoCodec::H264 => {
+            let mut avc1_payload = Vec::new();
+            avc1_payload.extend_from_slice(&[0u8; 6]); // reserved
+            avc1_payload.extend_from_slice(&1u16.to_be_bytes()); // data_reference_index = 1
+            avc1_payload.extend_from_slice(&0u16.to_be_bytes()); // pre_defined
+            avc1_payload.extend_from_slice(&0u16.to_be_bytes()); // reserved
+            avc1_payload.extend_from_slice(&[0u8; 12]); // pre_defined [0; 3]
+            avc1_payload.extend_from_slice(&(config.width as u16).to_be_bytes());
+            avc1_payload.extend_from_slice(&(config.height as u16).to_be_bytes());
+            avc1_payload.extend_from_slice(&0x00480000u32.to_be_bytes()); // horizresolution 72 dpi
+            avc1_payload.extend_from_slice(&0x00480000u32.to_be_bytes()); // vertresolution 72 dpi
+            avc1_payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
+            avc1_payload.extend_from_slice(&1u16.to_be_bytes()); // frame_count = 1
+            avc1_payload.extend_from_slice(&[0u8; 32]); // compressorname (32 zero bytes)
+            avc1_payload.extend_from_slice(&0x0018u16.to_be_bytes()); // depth = 24
+            avc1_payload.extend_from_slice(&0xFFFFu16.to_be_bytes()); // pre_defined = -1
 
-    // avcC box
-    let avcc_box = build_avcc(&config.sps, &config.pps);
-    avc1_payload.extend_from_slice(&avcc_box);
+            // avcC box
+            let avcc_box = build_avcc(&config.sps, &config.pps);
+            avc1_payload.extend_from_slice(&avcc_box);
 
-    let avc1_box = write_box(b"avc1", &avc1_payload);
+            let avc1_box = write_box(b"avc1", &avc1_payload);
 
-    let mut stsd_payload = Vec::new();
-    stsd_payload.extend_from_slice(&[0, 0, 0, 0]); // version + flags
-    stsd_payload.extend_from_slice(&1u32.to_be_bytes()); // entry_count = 1
-    stsd_payload.extend_from_slice(&avc1_box);
+            let mut stsd_payload = Vec::new();
+            stsd_payload.extend_from_slice(&[0, 0, 0, 0]); // version + flags
+            stsd_payload.extend_from_slice(&1u32.to_be_bytes()); // entry_count = 1
+            stsd_payload.extend_from_slice(&avc1_box);
 
-    write_box(b"stsd", &stsd_payload)
+            write_box(b"stsd", &stsd_payload)
+        }
+        VideoCodec::H265 => {
+            let mut hvc1_payload = Vec::new();
+            hvc1_payload.extend_from_slice(&[0u8; 6]); // reserved
+            hvc1_payload.extend_from_slice(&1u16.to_be_bytes()); // data_reference_index = 1
+            hvc1_payload.extend_from_slice(&0u16.to_be_bytes()); // pre_defined
+            hvc1_payload.extend_from_slice(&0u16.to_be_bytes()); // reserved
+            hvc1_payload.extend_from_slice(&[0u8; 12]); // pre_defined [0; 3]
+            hvc1_payload.extend_from_slice(&(config.width as u16).to_be_bytes());
+            hvc1_payload.extend_from_slice(&(config.height as u16).to_be_bytes());
+            hvc1_payload.extend_from_slice(&0x00480000u32.to_be_bytes()); // horizresolution 72 dpi
+            hvc1_payload.extend_from_slice(&0x00480000u32.to_be_bytes()); // vertresolution 72 dpi
+            hvc1_payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
+            hvc1_payload.extend_from_slice(&1u16.to_be_bytes()); // frame_count = 1
+            hvc1_payload.extend_from_slice(&[0u8; 32]); // compressorname (32 zero bytes)
+            hvc1_payload.extend_from_slice(&0x0018u16.to_be_bytes()); // depth = 24
+            hvc1_payload.extend_from_slice(&0xFFFFu16.to_be_bytes()); // pre_defined = -1
+
+            // hvcC box
+            let vps = config.vps.as_deref().unwrap_or(&[]);
+            let hvcc_data = crate::bitstream::h265::build_hvcc(vps, &config.sps, &config.pps);
+            let hvcc_box = write_box(b"hvcC", &hvcc_data);
+            hvc1_payload.extend_from_slice(&hvcc_box);
+
+            let hvc1_box = write_box(b"hvc1", &hvc1_payload);
+
+            let mut stsd_payload = Vec::new();
+            stsd_payload.extend_from_slice(&[0, 0, 0, 0]); // version + flags
+            stsd_payload.extend_from_slice(&1u32.to_be_bytes()); // entry_count = 1
+            stsd_payload.extend_from_slice(&hvc1_box);
+
+            write_box(b"stsd", &stsd_payload)
+        }
+    }
 }
 
 fn build_avcc(sps: &[u8], pps: &[u8]) -> Vec<u8> {
@@ -634,13 +723,13 @@ mod tests {
         let sps = vec![0x67, 0x42, 0xC0, 0x1E, 0xD9, 0x00, 0xA0, 0x7B, 0x40];
         let pps = vec![0x68, 0xCE, 0x38, 0x80];
 
-        muxer.set_video_track(VideoTrackConfig {
-            width: 1280,
-            height: 720,
-            timescale: 30000,
+        muxer.set_video_track(VideoTrackConfig::new_h264(
+            1280,
+            720,
+            30000,
             sps,
             pps,
-        });
+        ));
 
         muxer.set_audio_track(AudioTrackConfig {
             timescale: 44100,
@@ -680,6 +769,58 @@ mod tests {
         let vtrack = tracks.iter().find(|t| t.codec.starts_with("avc1")).expect("must parse video track");
         assert_eq!(vtrack.width, 1280);
         assert_eq!(vtrack.height, 720);
+        assert_eq!(vtrack.samples.len(), 3);
+        assert!(vtrack.samples[0].is_key);
+        assert!(!vtrack.samples[1].is_key);
+    }
+
+    #[test]
+    fn test_mp4_hevc_faststart_roundtrip() {
+        let mut muxer = RustMp4Muxer::new();
+
+        // Synthetic HEVC parameter sets: VPS (32), SPS (33), PPS (34)
+        let vps = vec![0x40, 0x01, 0x0c, 0x01];
+        let sps = vec![0x42, 0x01, 0x01, 0x01];
+        let pps = vec![0x44, 0x01, 0xc0];
+
+        muxer.set_video_track(VideoTrackConfig::new_h265(
+            3840,
+            2160,
+            60000,
+            vps,
+            sps,
+            pps,
+        ));
+
+        // Write 3 HEVC samples (IDR = 0x26, Non-IRAP = 0x02)
+        let sample1 = vec![0, 0, 0, 5, 0x26, 0x01, 1, 2, 3]; // IDR
+        let sample2 = vec![0, 0, 0, 5, 0x02, 0x01, 4, 5, 6]; // Trail
+        let sample3 = vec![0, 0, 0, 5, 0x02, 0x01, 7, 8, 9];
+
+        muxer.write_video_sample(&sample1, 1000, true);
+        muxer.write_video_sample(&sample2, 1000, false);
+        muxer.write_video_sample(&sample3, 1000, false);
+
+        let mp4_bytes = muxer.finalize();
+        assert!(!mp4_bytes.is_empty());
+
+        // Verify FastStart order
+        let moov_pos = mp4_bytes.windows(4).position(|w| w == b"moov").expect("must have moov");
+        let mdat_pos = mp4_bytes.windows(4).position(|w| w == b"mdat").expect("must have mdat");
+        assert!(moov_pos < mdat_pos, "moov must precede mdat");
+
+        // Verify hvc1 & hvcC exist in the byte buffer
+        assert!(mp4_bytes.windows(4).any(|w| w == b"hvc1"));
+        assert!(mp4_bytes.windows(4).any(|w| w == b"hvcC"));
+
+        // Verify with Mp4Demuxer
+        let demuxer = Mp4Demuxer::new(&mp4_bytes);
+        let tracks = demuxer.parse();
+        assert_eq!(tracks.len(), 1);
+        let vtrack = &tracks[0];
+        assert!(vtrack.codec.starts_with("hvc1"));
+        assert_eq!(vtrack.width, 3840);
+        assert_eq!(vtrack.height, 2160);
         assert_eq!(vtrack.samples.len(), 3);
         assert!(vtrack.samples[0].is_key);
         assert!(!vtrack.samples[1].is_key);

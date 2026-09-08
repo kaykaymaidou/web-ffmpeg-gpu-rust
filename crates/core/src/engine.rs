@@ -286,13 +286,24 @@ impl RustWasmMp4Muxer {
     }
 
     pub fn set_video_track(&mut self, width: u32, height: u32, timescale: u32, sps: Vec<u8>, pps: Vec<u8>) {
-        self.inner.set_video_track(VideoTrackConfig {
+        self.inner.set_video_track(VideoTrackConfig::new_h264(
             width,
             height,
             timescale,
             sps,
             pps,
-        });
+        ));
+    }
+
+    pub fn set_hevc_video_track(&mut self, width: u32, height: u32, timescale: u32, vps: Vec<u8>, sps: Vec<u8>, pps: Vec<u8>) {
+        self.inner.set_video_track(VideoTrackConfig::new_h265(
+            width,
+            height,
+            timescale,
+            vps,
+            sps,
+            pps,
+        ));
     }
 
     pub fn set_audio_track(&mut self, timescale: u32, sample_rate: u32, channels: u16, config: Option<Vec<u8>>) {

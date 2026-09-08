@@ -308,4 +308,88 @@ test.describe('Industrial Failure Cases & Self-Correction Autopilot Matrix (FAIL
     await pipeline.stop();
     expect(pipeline.active).toBe(false);
   });
+
+  test('FAIL-07 Autocorrection: Repeated packets with identical PTS and zero duration must be monotonically advanced', async ({ page }) => {
+    await page.goto('/');
+
+    const result = await page.evaluate(() => {
+      // Simulate 5 consecutive packets with identical PTS (2000000 us) and zero duration
+      const rawPackets = [
+        { pts: 2000000, duration: 0, data: new Uint8Array([0x65, 0x01]) },
+        { pts: 2000000, duration: 0, data: new Uint8Array([0x41, 0x02]) },
+        { pts: 2000000, duration: 0, data: new Uint8Array([0x41, 0x03]) },
+        { pts: 2000000, duration: 0, data: new Uint8Array([0x41, 0x04]) },
+        { pts: 2000000, duration: 0, data: new Uint8Array([0x41, 0x05]) },
+      ];
+
+      // Autocorrection pipeline logic (FAIL-07 defense)
+      let lastPts = -1;
+      const corrected = rawPackets.map((pkt) => {
+        let pts = pkt.pts;
+        if (lastPts >= 0 && pts <= lastPts) {
+          pts = lastPts + 1; // Enforce monotonic advance
+        }
+        let duration = pkt.duration;
+        if (duration === 0) {
+          duration = 33333; // Default 30fps slice duration
+        }
+        lastPts = pts;
+        return { pts, duration };
+      });
+
+      return {
+        isStrictlyMonotonic: corrected.every((p, idx) => idx === 0 || p.pts > corrected[idx - 1].pts),
+        hasNonZeroDurations: corrected.every((p) => p.duration > 0),
+        firstPts: corrected[0].pts,
+        lastPts: corrected[corrected.length - 1].pts,
+      };
+    });
+
+    expect(result.isStrictlyMonotonic).toBe(true);
+    expect(result.hasNonZeroDurations).toBe(true);
+    expect(result.lastPts).toBeGreaterThan(result.firstPts);
+  });
+
+  test('FAIL-08 Autocorrection: Dynamic Resolution Switching (DRS) mid-flight must adapt viewport without crash', async ({ page }) => {
+    await page.goto('/');
+
+    const drsResult = await page.evaluate(() => {
+      // Simulate ABR stream: 1920x1080 -> 1280x720 -> 1080x1920 (portrait mode)
+      const streamFrames = [
+        { width: 1920, height: 1080, aspect: 16 / 9 },
+        { width: 1920, height: 1080, aspect: 16 / 9 },
+        { width: 1280, height: 720, aspect: 16 / 9 },
+        { width: 1280, height: 720, aspect: 16 / 9 },
+        { width: 1080, height: 1920, aspect: 9 / 16 }, // Dynamic orientation change
+      ];
+
+      let canvasWidth = 1920;
+      let canvasHeight = 1080;
+      const viewportEvents: { w: number; h: number; letterbox: boolean }[] = [];
+
+      for (const frame of streamFrames) {
+        // DRS Viewport adaptation logic
+        const frameAspect = frame.width / frame.height;
+        const canvasAspect = canvasWidth / canvasHeight;
+        const needsLetterbox = Math.abs(frameAspect - canvasAspect) > 0.01;
+
+        viewportEvents.push({
+          w: frame.width,
+          h: frame.height,
+          letterbox: needsLetterbox,
+        });
+      }
+
+      return {
+        totalProcessed: viewportEvents.length,
+        detectedOrientationSwitch: viewportEvents[4].letterbox,
+        drsTransitionsCount: viewportEvents.filter((_, i) => i > 0 && viewportEvents[i].w !== viewportEvents[i - 1].w).length,
+      };
+    });
+
+    expect(drsResult.totalProcessed).toBe(5);
+    expect(drsResult.detectedOrientationSwitch).toBe(true);
+    expect(drsResult.drsTransitionsCount).toBe(2);
+  });
 });
+

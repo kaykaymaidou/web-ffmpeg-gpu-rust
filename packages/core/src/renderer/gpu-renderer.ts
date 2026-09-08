@@ -8,6 +8,7 @@ const FILTER_MODE_MAP: Record<FilterMode, number> = {
   brightness_contrast: 3,
   sepia: 4,
   vignette: 5,
+  hdr_tonemap: 6,
 };
 
 export class WebGpuVideoRenderer {

@@ -10,6 +10,7 @@ pub enum GpuFilterType {
     BrightnessContrast = 3,
     ColorGradingLut = 4,
     GaussianBlur = 5,
+    HdrToneMapping = 6,
 }
 
 /// GPU Filter parameter definition block.

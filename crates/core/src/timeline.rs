@@ -73,6 +73,10 @@ impl TimelineQueue {
             non_negative
         };
         packet.set_pts(sanitized_pts);
+        if packet.duration() == 0 {
+            // FAIL-07 Autocorrection: Clamp 0 duration to default non-zero slice duration
+            packet.set_duration(33333);
+        }
         self.last_emitted_pts = sanitized_pts;
         packet
     }
@@ -155,6 +159,31 @@ mod tests {
         scheduler.push(p_regress);
         let out3 = scheduler.pop().unwrap();
         assert!(out3.pts() > out2.pts(), "Retrograde timestamp must be clamped monotonically");
+    }
+
+    #[test]
+    fn test_fail07_pts_collision_and_zero_duration_autocorrection() {
+        let mut queue = TimelineQueue::new(1);
+
+        // 3 consecutive packets with identical PTS (1000) and 0 duration
+        let p1 = Packet::new(1000, 1000, 0, true, 0, vec![1]);
+        let p2 = Packet::new(1000, 1000, 0, false, 0, vec![2]);
+        let p3 = Packet::new(1000, 1000, 0, false, 0, vec![3]);
+
+        queue.push(p1);
+        let out1 = queue.pop().unwrap();
+        assert_eq!(out1.pts(), 1000);
+        assert_eq!(out1.duration(), 33333, "Zero duration must be clamped to safe slice duration");
+
+        queue.push(p2);
+        let out2 = queue.pop().unwrap();
+        assert_eq!(out2.pts(), 1001, "Collided identical PTS must advance by at least 1us");
+        assert_eq!(out2.duration(), 33333);
+
+        queue.push(p3);
+        let out3 = queue.pop().unwrap();
+        assert_eq!(out3.pts(), 1002);
+        assert_eq!(out3.duration(), 33333);
     }
 }
 

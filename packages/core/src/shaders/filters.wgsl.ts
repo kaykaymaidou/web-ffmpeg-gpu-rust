@@ -42,6 +42,24 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 @group(0) @binding(1) var video_texture: texture_external;
 @group(0) @binding(2) var<uniform> params: FilterUniforms;
 
+// Linear BT.2020 to linear BT.709 color matrix transform (ITU-R BT.2087)
+fn bt2020_to_bt709(c: vec3<f32>) -> vec3<f32> {
+  let r =  1.6604910 * c.r - 0.5876411 * c.g - 0.0728499 * c.b;
+  let g = -0.1245505 * c.r + 1.1328999 * c.g - 0.0083494 * c.b;
+  let b = -0.0181508 * c.r - 0.1005789 * c.g + 1.1187297 * c.b;
+  return max(vec3<f32>(r, g, b), vec3<f32>(0.0));
+}
+
+// ACES Filmic Tone Mapping Curve (Narkowicz 2015)
+fn aces_filmic(x: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   var color = textureSampleBaseClampToEdge(video_texture, video_sampler, in.uv);
@@ -72,6 +90,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let d = distance(in.uv, vec2<f32>(0.5, 0.5));
     let vignette = smoothstep(0.8, 0.2, d);
     rgb = rgb * vignette;
+  } else if (params.filter_mode == 6u) {
+    // HDR10 (BT.2020 PQ/HLG) to SDR Filmic Tone Mapping & Gamut Compression
+    let hdr_linear = pow(max(rgb * 1.6, vec3<f32>(0.0)), vec3<f32>(1.2));
+    let bt709_color = bt2020_to_bt709(hdr_linear);
+    let mapped = aces_filmic(bt709_color);
+    rgb = pow(mapped, vec3<f32>(1.0 / 1.05));
   }
 
   return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);

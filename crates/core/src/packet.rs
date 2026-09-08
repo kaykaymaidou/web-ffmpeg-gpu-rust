@@ -84,4 +84,9 @@ impl Packet {
     pub fn set_dts(&mut self, dts: i64) {
         self.dts = dts;
     }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_duration(&mut self, duration: u64) {
+        self.duration = duration;
+    }
 }

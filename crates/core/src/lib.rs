@@ -18,7 +18,7 @@ pub use engine::{create_rust_packet, create_rust_timeline, RustDemuxer, RustStre
 pub use filter::RustCpuFilter;
 pub use frame::{ColorSpace, FrameMetadata, PixelFormat};
 pub use live::{FlvHeader, FlvVideoTagInfo, JitterBuffer, JitterBufferConfig, RustFlvDemuxer};
-pub use muxer::{RustMp4Muxer, VideoTrackConfig, AudioTrackConfig};
+pub use muxer::{AudioTrackConfig, RustMp4Muxer, VideoCodec, VideoTrackConfig};
 pub use packet::Packet;
 pub use timeline::TimelineQueue;
 
