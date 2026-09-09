@@ -311,6 +311,68 @@
           <button class="btn btn-primary" id="btn-toggle-compositor" style="width: 100%; font-size: 11px; padding: 5px;">▶ 启动 WebGPU 实时多路合成演示</button>
         </div>
 
+        <!-- WebRTC Multi-Peer Mesh Card -->
+        <div class="card mesh-card" style="border-color: #8b5cf6;">
+          <div class="card-title" style="color: #c084fc;">
+            <span>🌐 多端连麦 Mesh 互动拓扑网络 (Multi-Peer Mesh)</span>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">连麦角色</label>
+              <select id="select-mesh-role" class="form-select" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+                <option value="host">👑 主播端 (Host - 混流+发布)</option>
+                <option value="guest">🎤 嘉宾端 (Guest - 连麦互动)</option>
+                <option value="viewer">👀 观众端 (Viewer - 仅收听看)</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">房间号 (Mesh Room)</label>
+              <input type="text" id="input-mesh-room" value="mesh-room-main" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;" />
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">画面合流预设</label>
+              <select id="select-mesh-layout" class="form-select" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+                <option value="pip_br">画中画 (PIP 右下角)</option>
+                <option value="split_horizontal">左右分屏 (Split 50:50)</option>
+                <option value="grid_2x2">四宫格 (2x2 Grid)</option>
+                <option value="single">单路主画面 (Single)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button class="btn btn-primary" id="btn-toggle-mesh" style="flex: 1; background: #7c3aed; border-color: #6d28d9;">▶ 加入 Mesh 连麦房</button>
+            <button class="btn btn-secondary" id="btn-mesh-pli" disabled style="flex: 1;">⚡ 定向 PLI 自愈</button>
+          </div>
+
+          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">
+            节点 ID: <span id="mesh-peer-id" style="color: #cbd5e1; font-weight: bold;">--</span> | 拓扑活跃对端: <span id="mesh-active-peers" style="color: #a78bfa; font-weight: bold;">0 个</span>
+          </div>
+
+          <div class="transcode-stats" style="margin-top: 6px;">
+            <div class="stat-item">
+              <span class="stat-title">本地采集推流 FPS</span>
+              <span class="stat-val" id="metric-mesh-ingest-fps">0 FPS</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">总视频/音频报文</span>
+              <span class="stat-val" id="metric-mesh-packets">0 / 0 pkts</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">定向 PLI 触发 / 响应</span>
+              <span class="stat-val" id="metric-mesh-pli" style="color: #38bdf8;">0 / 0 次</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">显存合流与混音状态</span>
+              <span class="stat-val" id="metric-mesh-status" style="color: #34d399;">正常 (0 泄漏)</span>
+            </div>
+          </div>
+        </div>
+
         <!-- AI Media Autopilot Cockpit Card -->
         <div class="card autopilot-card" style="border-color: #6366f1;">
           <div class="card-title" style="color: #a5b4fc;">

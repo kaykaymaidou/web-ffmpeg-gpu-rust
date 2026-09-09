@@ -8,3 +8,4 @@ export * from './p2p-session';
 export * from './opus-rtp';
 export * from './audio-player';
 export * from './audio-mixer';
+export * from './mesh-session';

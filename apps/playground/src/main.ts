@@ -15,6 +15,8 @@ import {
   WebAudioLivePlayer,
   WebGpuMultiStreamCompositor,
   MultiTrackAudioMixer,
+  MultiPeerMeshSession,
+  type MeshPeerRole,
 } from '@web-ffmpeg-gpu/core';
 import { MediaAutopilotAgent, type AgentThoughtStep, type AutopilotDirective } from '@web-ffmpeg-gpu/agent';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
@@ -22,6 +24,7 @@ import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, Tran
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
 (window as any).WebGpuMultiStreamCompositor = WebGpuMultiStreamCompositor;
 (window as any).MultiTrackAudioMixer = MultiTrackAudioMixer;
+(window as any).MultiPeerMeshSession = MultiPeerMeshSession;
 (window as any).LiveLoopbackSession = LiveLoopbackSession;
 (window as any).LiveP2PSender = LiveP2PSender;
 (window as any).LiveP2PReceiver = LiveP2PReceiver;
@@ -112,6 +115,24 @@ const btnToggleCompositor = document.getElementById('btn-toggle-compositor') as 
 
 let activeCompositor: WebGpuMultiStreamCompositor | null = null;
 let compositorAnimationId: number | null = null;
+
+// Multi-Peer Mesh Elements
+const selectMeshRole = document.getElementById('select-mesh-role') as HTMLSelectElement;
+const inputMeshRoom = document.getElementById('input-mesh-room') as HTMLInputElement;
+const selectMeshLayout = document.getElementById('select-mesh-layout') as HTMLSelectElement;
+const btnToggleMesh = document.getElementById('btn-toggle-mesh') as HTMLButtonElement;
+const btnMeshPli = document.getElementById('btn-mesh-pli') as HTMLButtonElement;
+const meshPeerIdBadge = document.getElementById('mesh-peer-id') as HTMLSpanElement;
+const meshActivePeersBadge = document.getElementById('mesh-active-peers') as HTMLSpanElement;
+const metricMeshIngestFps = document.getElementById('metric-mesh-ingest-fps') as HTMLSpanElement;
+const metricMeshPackets = document.getElementById('metric-mesh-packets') as HTMLSpanElement;
+const metricMeshPli = document.getElementById('metric-mesh-pli') as HTMLSpanElement;
+const metricMeshStatus = document.getElementById('metric-mesh-status') as HTMLSpanElement;
+
+let activeMeshSession: MultiPeerMeshSession | null = null;
+let meshCompositor: WebGpuMultiStreamCompositor | null = null;
+let meshAudioMixer: MultiTrackAudioMixer | null = null;
+let meshRenderLoopId: number | null = null;
 
 // AI Media Autopilot Elements
 const checkboxAutopilotEnable = document.getElementById('checkbox-autopilot-enable') as HTMLInputElement;
@@ -652,6 +673,119 @@ function setupEventListeners() {
         btnToggleCompositor.className = 'btn btn-primary';
         btnToggleCompositor.disabled = false;
         activeCompositor = null;
+      }
+    });
+
+    // Multi-Peer Mesh Event Listeners
+    selectMeshLayout.addEventListener('change', () => {
+      activeMeshSession?.setLayoutPreset(selectMeshLayout.value as any);
+      meshCompositor?.setLayoutPreset(selectMeshLayout.value as any);
+    });
+
+    btnMeshPli.addEventListener('click', () => {
+      activeMeshSession?.requestKeyframe();
+    });
+
+    btnToggleMesh.addEventListener('click', async () => {
+      if (activeMeshSession) {
+        if (meshRenderLoopId) {
+          cancelAnimationFrame(meshRenderLoopId);
+          meshRenderLoopId = null;
+        }
+        activeMeshSession.stop();
+        activeMeshSession = null;
+        if (meshCompositor) {
+          meshCompositor.destroy();
+          meshCompositor = null;
+        }
+        if (meshAudioMixer) {
+          meshAudioMixer.destroy();
+          meshAudioMixer = null;
+        }
+        btnToggleMesh.textContent = '▶ 加入 Mesh 连麦房';
+        btnToggleMesh.className = 'btn btn-primary';
+        btnMeshPli.disabled = true;
+        meshPeerIdBadge.textContent = '--';
+        meshActivePeersBadge.textContent = '0 个';
+        metricMeshIngestFps.textContent = '0 FPS';
+        metricMeshPackets.textContent = '0 / 0 pkts';
+        metricMeshPli.textContent = '0 / 0 次';
+        metricMeshStatus.textContent = '正常 (0 泄漏)';
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      try {
+        btnToggleMesh.disabled = true;
+        btnToggleMesh.textContent = '正在握手 Mesh 拓扑网络...';
+        emptyState.style.display = 'none';
+
+        const role = selectMeshRole.value as MeshPeerRole;
+        const roomId = inputMeshRoom.value.trim() || 'mesh-room-main';
+
+        // 1. Initialize WebGPU compositor for mesh rendering
+        meshCompositor = new WebGpuMultiStreamCompositor({
+          canvas,
+          initialPreset: selectMeshLayout.value as any,
+        });
+        await meshCompositor.initialize();
+
+        // 2. Initialize MultiTrackAudioMixer
+        meshAudioMixer = new MultiTrackAudioMixer({ sampleRate: 48000 });
+
+        // 3. Signaling channel (BroadcastChannel for cross-tab mesh)
+        const signaling = new BroadcastChannelSignaling(roomId);
+
+        activeMeshSession = new MultiPeerMeshSession({
+          roomId,
+          role,
+          signaling,
+          compositor: meshCompositor,
+          audioMixer: meshAudioMixer,
+          onPeerJoin: (peerId) => {
+            console.log(`[Mesh] Remote peer joined: ${peerId}`);
+            meshActivePeersBadge.textContent = `${activeMeshSession?.getRemotePeerIds().length || 0} 个`;
+          },
+          onPeerLeave: (peerId) => {
+            console.log(`[Mesh] Remote peer left: ${peerId}`);
+            meshActivePeersBadge.textContent = `${activeMeshSession?.getRemotePeerIds().length || 0} 个`;
+          },
+          onMetrics: (m) => {
+            metricMeshIngestFps.textContent = `${m.ingestFps} FPS`;
+            metricMeshPackets.textContent = `${m.totalVideoPacketsSent} / ${m.totalAudioPacketsSent} pkts`;
+            metricMeshPli.textContent = `${m.targetedPliSent} / ${m.targetedPliReceived} 次`;
+            meshActivePeersBadge.textContent = `${m.activePeersCount} 个`;
+          },
+          onError: (err) => {
+            console.error('[MultiPeerMeshSession Error]', err);
+          },
+        });
+
+        meshPeerIdBadge.textContent = activeMeshSession.peerId;
+
+        // Render loop for compositor
+        const renderMeshLoop = () => {
+          if (meshCompositor) {
+            meshCompositor.composite();
+            metricMeshStatus.textContent = `活跃合流 ${meshCompositor.getActiveFrameCount()} 帧 (0 显存泄漏)`;
+          }
+          meshRenderLoopId = requestAnimationFrame(renderMeshLoop);
+        };
+        meshRenderLoopId = requestAnimationFrame(renderMeshLoop);
+
+        await activeMeshSession.start();
+
+        btnToggleMesh.textContent = '⏹ 离开 Mesh 连麦房';
+        btnToggleMesh.className = 'btn btn-danger';
+        btnToggleMesh.disabled = false;
+        btnMeshPli.disabled = false;
+      } catch (err: any) {
+        console.error('Failed to join Mesh room:', err);
+        alert(`加入连麦房失败: ${err.message || err}`);
+        btnToggleMesh.textContent = '▶ 加入 Mesh 连麦房';
+        btnToggleMesh.className = 'btn btn-primary';
+        btnToggleMesh.disabled = false;
+        activeMeshSession = null;
       }
     });
 
