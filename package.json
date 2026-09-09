@@ -2,7 +2,7 @@
   "name": "web-ffmpeg-gpu-root",
   "version": "0.1.0",
   "private": true,
-  "description": "Next-Gen Web-FFmpeg Monorepo with WebGPU Shader Pipelines & WebCodecs Hardware Acceleration",
+  "description": "Next-Gen Web-FFmpeg Monorepo: Rust Core, WebCodecs ASIC Hardware Acceleration, WebGPU Realtime Shaders, WebRTC Multi-Peer Mesh, and DeepSeek Harness (dsh) AI Media Autopilot",
   "type": "module",
   "workspaces": [
     "packages/*",
