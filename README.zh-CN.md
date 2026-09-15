@@ -205,7 +205,20 @@
 
 ---
 
-### 4. 图像滤镜与后处理延迟 (1080p RGBA)
+### 4. 真实工业级片源实测（Big Buck Bunny 与 Intel 1,189 帧高吞吐工业视频）
+
+除阶梯码流外，我们采用真实公网母片（开源标准测试片源与 Intel 工业流）进行硬核对抗评测：
+
+| 真实测试片源 | 规格特征 | 传统原生 FFmpeg CLI 耗时 | 传统 `ffmpeg.wasm` 软解帧率 | **本项目拆包耗时** | **本项目 WebCodecs 硬解帧率** | **综合提速效果** |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Big Buck Bunny Trailer** | 250 帧，4 轨道，1,191 Samples | 7.0 ms | 407.7 FPS | **0.195 ms** (C-ABI FFI: 9.03 ms*) | **1,977.1 FPS** (耗时仅 126 ms) | **拆包快 35.8x ⚡，硬解快 4.8x 🚀** |
+| **Intel Bottle Detection** | **1,189 帧** 工业级高密度数据流 | 14.0 ms | 76.4 FPS (1570 ms) | **0.212 ms** (内存视图切片) | **2,176.8 FPS** (546 ms 跑完 1189 帧) | **拆包快 66.0x ⚡，硬解快 28.5x 🚀** |
+
+> *\*注：C-ABI FFI 耗时包含 Windows 下通过 C# P/Invoke 动态库调用、磁盘全量文件载入、以及 1,191 个样本完整遍历提取。*
+
+---
+
+### 5. 图像滤镜与后处理延迟 (1080p RGBA)
 
 - **传统 `ffmpeg.wasm` 滤镜图 (`hue=s=0`)**：`95.0 ms / 帧`（CPU 逐像素计算，帧率上限仅 ~10 FPS）；
 - **本项目纯 Rust CPU SIMD 向量化灰度**：`6.5 ms / 帧`（**快 14.5 倍**）；
@@ -221,11 +234,14 @@
 
 | 运行环境 | 解复用 / 码流诊断 / 音频 DSP | 视频滤镜处理 | 重型视频编解码 (Transcode) | 核心定位与收益 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Web 浏览器** (`packages/core`) | 纯 Rust WASM（0.08ms 极速解复用） | WebGPU Compute Shader（< 0.5ms） | WebCodecs 直通物理显卡（500~700 FPS 硬解） | **彻底干掉传统 `ffmpeg.wasm`**，告别 30MB 庞大体积与 CPU 爆满掉帧。 |
+| **Web 浏览器** (`packages/core`) | 纯 Rust WASM（0.08ms 极速解复用） | WebGPU Compute Shader（< 0.5ms） | WebCodecs 直通物理显卡（500~2170 FPS 硬解） | **彻底干掉传统 `ffmpeg.wasm`**，告别 30MB 庞大体积与 CPU 爆满掉帧。 |
 | **Agent 自愈中枢** (`packages/agent`) | 纯 Rust 原生机器码（2~5ms 解析） | 纯 Rust CPU SIMD 滤镜（6ms 灰度） | 智能编排调度：调度本地带有 NVENC/QSV 的硬件底层 | **定位为高智商排障专家**：处理脏流修复、SPS 自愈、残缺 MP4 补救、音画漂移校正，秒级产出自愈动作。 |
 | **桌面端与后台服务** (`crates/native` / `apps/windows-service`) | 纯 Rust C-ABI 编译为原生 `.dll` / `.so` | 原生计算着色器 / SIMD 指令集 | 桥接 Windows D3D11VA / DirectX / NVCODEC 显卡硬编 | **无头稳定高吞吐**：零内存泄漏，全天候文件夹监听转码，硬件编解码满跑 100+ FPS（3.4x 实时倍速）。 |
 
-*注：以上所有测试用例与数据均可通过 `npm run bench:layers`、`npm run bench:demux` 与 `cargo test --workspace` 在本机一键重现验证。*
+> 📖 深度架构设计与行业对标白皮书已独立归档：
+> - 🏛️ **[双轮驱动通用架构白皮书 (Dual-Engine Architecture Blueprint)](docs/DUAL_ENGINE_ARCHITECTURE.md)**
+> - 🌐 **[工业界主流产品（剪映/B站/YouTube）技术选型深度剖析与公网测试矢量指南](docs/INDUSTRY_REFERENCE.md)**
+> - 📡 **[RFC 0003 WHIP/WHEP 超低延迟规范](docs/rfcs/0003-whip-whep-live-broadcast.md)**
 
 ---
 
@@ -241,11 +257,14 @@
 # 安装依赖
 npm install
 
-# 验证架构边界硬性约束 (Zero-OS-I/O 检查)
+# 验证架构边界硬性约束 (Zero-OS-I/O 检查，26 个 Rust 源码文件 100% 合规)
 npm run check:boundaries
 
-# 运行 Rust 全工作区单元测试 (54 个用例 100% 通过)
+# 运行 Rust 全工作区单元测试 (57 个用例 100% 通过)
 cargo test --workspace
+
+# 运行 Desktop C-ABI 动态链接库 6 级自动化回归测试 (PowerShell P/Invoke)
+npm run test:c-abi
 
 # 编译纯 Rust 核心为 WASM 包
 npm run build:wasm

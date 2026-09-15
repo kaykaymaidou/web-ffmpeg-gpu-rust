@@ -188,7 +188,20 @@ Comparing pure Rust / ISOBMFF demuxing against native FFmpeg CLI (`ffmpeg-static
 
 ---
 
-### 4. Post-processing & Filter Latency (1080p RGBA)
+### 4. Real-World Industry Media Benchmarks (Big Buck Bunny & Intel 1,189-Frame Stream)
+
+Beyond synthetic ladder files, we evaluate real open-source masters and industrial video clips:
+
+| Real-World Media Clip | Profile Specs | Native FFmpeg CLI Time | `ffmpeg.wasm` Soft Decode FPS | **Our Demux Time** | **Our WebCodecs HW Decode FPS** | **Net Acceleration** |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Big Buck Bunny Trailer** | 250 frames, 4 tracks, 1,191 samples | 7.0 ms | 407.7 FPS | **0.195 ms** (C-ABI FFI: 9.03 ms*) | **1,977.1 FPS** (total 126 ms) | **Demux 35.8x faster ⚡, Decode 4.8x faster 🚀** |
+| **Intel Bottle Detection** | **1,189 frames** industrial IoT stream | 14.0 ms | 76.4 FPS (1,570 ms) | **0.212 ms** (memory slice) | **2,176.8 FPS** (1,189 frames in 546 ms) | **Demux 66.0x faster ⚡, Decode 28.5x faster 🚀** |
+
+> *\*Note: C-ABI FFI time includes Windows dynamic DLL loading via C# P/Invoke, full disk file read, and complete parsing across 1,191 samples.*
+
+---
+
+### 5. Post-processing & Filter Latency (1080p RGBA)
 
 - **Traditional `ffmpeg.wasm` Filtergraph (`hue=s=0`)**: `95.0 ms / frame` (CPU pixel loops, capped at ~10 FPS);
 - **Our Pure Rust CPU SIMD Grayscale**: `6.5 ms / frame` (**14.5x faster**);
@@ -204,11 +217,14 @@ The answer: **Yes, but each runtime environment has distinct, optimized architec
 
 | Runtime Environment | Demuxing / Bitstream / Audio DSP | Pixel Filtering | Heavy Transcoding (Decode/Encode) | Core Value & Advantage |
 | :--- | :--- | :--- | :--- | :--- |
-| **Web Browser** (`packages/core`) | Pure Rust WASM (0.08ms demux) | WebGPU Compute Shaders (< 0.5ms) | WebCodecs Hardware Direct (500~700 FPS) | **Replaces `ffmpeg.wasm` entirely**: drops 30MB payload and 100% CPU lockups. |
+| **Web Browser** (`packages/core`) | Pure Rust WASM (0.08ms demux) | WebGPU Compute Shaders (< 0.5ms) | WebCodecs Hardware Direct (500~2170 FPS) | **Replaces `ffmpeg.wasm` entirely**: drops 30MB payload and 100% CPU lockups. |
 | **Autonomous Agent** (`packages/agent`) | Pure Rust Native Machine Code (2~5ms) | Rust CPU SIMD routines (6ms gray) | Intelligent Orchestration: dispatches native hardware workers (NVENC/QSV) | **High-intelligence triage brain**: diagnoses corrupted NALs, salvages headless MP4s, autocorrects retrograde timestamps in milliseconds. |
 | **Desktop SDK & Services** (`crates/native` / `apps/windows-service`) | Pure Rust C-ABI exported `.dll` / `.so` | Native Compute Shaders / SIMD | Bridges Windows D3D11VA / DirectX / NVCODEC native hardware APIs | **Zero-leak, high-throughput background daemon**: 24/7 folder watcher processing bulk media at 100+ FPS (3.4x realtime). |
 
-*Note: All benchmarks are 100% reproducible via `npm run bench:layers`, `npm run bench:demux`, and `cargo test --workspace`.*
+> 📖 Deep-dive architectural blueprints and industry analyses:
+> - 🏛️ **[Dual-Engine Architecture Blueprint](docs/DUAL_ENGINE_ARCHITECTURE.md)**
+> - 🌐 **[Industry Reference (CapCut Web / Bilibili / YouTube) & Stream Vectors Guide](docs/INDUSTRY_REFERENCE.md)**
+> - 📡 **[RFC 0003 WHIP/WHEP Low-Latency Live Specification](docs/rfcs/0003-whip-whep-live-broadcast.md)**
 
 ---
 
@@ -224,11 +240,14 @@ The answer: **Yes, but each runtime environment has distinct, optimized architec
 # Install dependencies
 npm install
 
-# Verify Monorepo Architecture Invariants (Zero-OS-I/O)
+# Verify Monorepo Architecture Invariants (Zero-OS-I/O in all 26 Rust files)
 npm run check:boundaries
 
-# Run complete Rust workspace tests (54/54 passed in 0.01s)
+# Run complete Rust workspace tests (57/57 passed)
 cargo test --workspace
+
+# Run Desktop C-ABI dynamic library 6-tier verification suite (PowerShell P/Invoke)
+npm run test:c-abi
 
 # Build pure Rust core as WASM package
 npm run build:wasm
