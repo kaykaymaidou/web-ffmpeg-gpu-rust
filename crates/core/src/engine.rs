@@ -438,3 +438,125 @@ impl RustWasmRtpPacketizer {
     }
 }
 
+/// Pure Rust Matroska (MKV) & WebM Demuxer WASM Bridge.
+#[wasm_bindgen]
+pub struct RustMkvDemuxer {
+    result: crate::demuxer::mkv::MkvDemuxResult,
+}
+
+#[wasm_bindgen]
+impl RustMkvDemuxer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(data: &[u8]) -> Result<RustMkvDemuxer, JsValue> {
+        let result = crate::demuxer::mkv::demux_mkv(data)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(Self { result })
+    }
+
+    pub fn track_count(&self) -> usize {
+        self.result.tracks.len()
+    }
+
+    pub fn get_track_codec(&self, index: usize) -> Option<String> {
+        self.result.tracks.get(index).map(|t| t.codec_id.clone())
+    }
+
+    pub fn get_track_type(&self, index: usize) -> Option<u8> {
+        self.result.tracks.get(index).map(|t| t.track_type)
+    }
+
+    pub fn get_video_dimensions(&self, index: usize) -> Option<js_sys::Uint32Array> {
+        let t = self.result.tracks.get(index)?;
+        let w = t.width?;
+        let h = t.height?;
+        let arr = js_sys::Uint32Array::new_with_length(2);
+        arr.set_index(0, w);
+        arr.set_index(1, h);
+        Some(arr)
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.result.frames.len()
+    }
+
+    pub fn get_frame_pts_us(&self, index: usize) -> Option<f64> {
+        self.result.frames.get(index).map(|f| f.pts_us as f64)
+    }
+
+    pub fn is_frame_keyframe(&self, index: usize) -> bool {
+        self.result.frames.get(index).map(|f| f.is_keyframe).unwrap_or(false)
+    }
+
+    pub fn get_frame_data(&self, index: usize) -> Option<Vec<u8>> {
+        self.result.frames.get(index).map(|f| f.data.clone())
+    }
+}
+
+/// Pure Rust Audio DSP & Resampling Engine WASM Bridge.
+#[wasm_bindgen]
+pub struct RustAudioDsp;
+
+#[wasm_bindgen]
+impl RustAudioDsp {
+    /// Resample interleaved f32 PCM audio between sample rates.
+    pub fn resample(
+        input: &[f32],
+        from_rate: u32,
+        to_rate: u32,
+        channels: u32,
+    ) -> Result<Vec<f32>, JsValue> {
+        crate::audio::resample_linear(input, from_rate, to_rate, channels)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Downmix 5.1 Surround f32 PCM audio to Stereo [L, R] using ITU-R BS.775.
+    pub fn downmix_51_to_stereo(input: &[f32], include_lfe: bool) -> Result<Vec<f32>, JsValue> {
+        crate::audio::mix_51_to_stereo(input, include_lfe)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Downmix Stereo [L, R] to Mono [M].
+    pub fn downmix_stereo_to_mono(input: &[f32]) -> Result<Vec<f32>, JsValue> {
+        crate::audio::mix_stereo_to_mono(input)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Upmix Mono to Stereo [L, R].
+    pub fn upmix_mono_to_stereo(input: &[f32]) -> Vec<f32> {
+        crate::audio::mix_mono_to_stereo(input)
+    }
+}
+
+/// FFmpeg-style Filtergraph Parser WASM Bridge.
+#[wasm_bindgen]
+pub struct RustWasmFilterGraph {
+    inner: crate::filter::FilterGraph,
+}
+
+#[wasm_bindgen]
+impl RustWasmFilterGraph {
+    #[wasm_bindgen(constructor)]
+    pub fn new(filter_str: &str) -> Result<RustWasmFilterGraph, JsValue> {
+        let inner = crate::filter::parse_filtergraph(filter_str)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.inner.nodes.len()
+    }
+
+    pub fn get_node_name(&self, index: usize) -> Option<String> {
+        self.inner.nodes.get(index).map(|n| n.name.clone())
+    }
+
+    pub fn get_node_target(&self, index: usize) -> Option<String> {
+        self.inner.nodes.get(index).map(|n| match n.target {
+            crate::filter::FilterTarget::WebGpuCompute => "webgpu".to_string(),
+            crate::filter::FilterTarget::CpuSimd => "cpu".to_string(),
+            crate::filter::FilterTarget::Passthrough => "passthrough".to_string(),
+        })
+    }
+}
+
+

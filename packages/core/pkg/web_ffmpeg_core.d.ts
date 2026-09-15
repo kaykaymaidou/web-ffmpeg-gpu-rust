@@ -128,6 +128,31 @@ export enum PixelFormat {
 }
 
 /**
+ * Pure Rust Audio DSP & Resampling Engine WASM Bridge.
+ */
+export class RustAudioDsp {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Downmix 5.1 Surround f32 PCM audio to Stereo [L, R] using ITU-R BS.775.
+     */
+    static downmix_51_to_stereo(input: Float32Array, include_lfe: boolean): Float32Array;
+    /**
+     * Downmix Stereo [L, R] to Mono [M].
+     */
+    static downmix_stereo_to_mono(input: Float32Array): Float32Array;
+    /**
+     * Resample interleaved f32 PCM audio between sample rates.
+     */
+    static resample(input: Float32Array, from_rate: number, to_rate: number, channels: number): Float32Array;
+    /**
+     * Upmix Mono to Stereo [L, R].
+     */
+    static upmix_mono_to_stereo(input: Float32Array): Float32Array;
+}
+
+/**
  * Pure Rust CPU image processing filters.
  * Designed with chunked iterators to allow LLVM to auto-vectorize with WASM SIMD128.
  */
@@ -225,6 +250,23 @@ export class RustFlvDemuxer {
 }
 
 /**
+ * Pure Rust Matroska (MKV) & WebM Demuxer WASM Bridge.
+ */
+export class RustMkvDemuxer {
+    free(): void;
+    [Symbol.dispose](): void;
+    frame_count(): number;
+    get_frame_data(index: number): Uint8Array | undefined;
+    get_frame_pts_us(index: number): number | undefined;
+    get_track_codec(index: number): string | undefined;
+    get_track_type(index: number): number | undefined;
+    get_video_dimensions(index: number): Uint32Array | undefined;
+    is_frame_keyframe(index: number): boolean;
+    constructor(data: Uint8Array);
+    track_count(): number;
+}
+
+/**
  * Rust-native stream feeder with in-band parameter set extraction (H.264 avcC & H.265 hvcC + HDR10).
  */
 export class RustStreamAnalyzer {
@@ -256,6 +298,18 @@ export class RustStreamAnalyzer {
      */
     is_keyframe(data: Uint8Array): boolean;
     constructor();
+}
+
+/**
+ * FFmpeg-style Filtergraph Parser WASM Bridge.
+ */
+export class RustWasmFilterGraph {
+    free(): void;
+    [Symbol.dispose](): void;
+    get_node_name(index: number): string | undefined;
+    get_node_target(index: number): string | undefined;
+    constructor(filter_str: string);
+    node_count(): number;
 }
 
 /**
@@ -406,10 +460,13 @@ export interface InitOutput {
     readonly __wbg_jitterbuffer_free: (a: number, b: number) => void;
     readonly __wbg_jitterbufferconfig_free: (a: number, b: number) => void;
     readonly __wbg_packet_free: (a: number, b: number) => void;
+    readonly __wbg_rustaudiodsp_free: (a: number, b: number) => void;
     readonly __wbg_rustcpufilter_free: (a: number, b: number) => void;
     readonly __wbg_rustdemuxer_free: (a: number, b: number) => void;
     readonly __wbg_rustflvdemuxer_free: (a: number, b: number) => void;
+    readonly __wbg_rustmkvdemuxer_free: (a: number, b: number) => void;
     readonly __wbg_ruststreamanalyzer_free: (a: number, b: number) => void;
+    readonly __wbg_rustwasmfiltergraph_free: (a: number, b: number) => void;
     readonly __wbg_rustwasmmp4muxer_free: (a: number, b: number) => void;
     readonly __wbg_rustwasmrtpdepacketizer_free: (a: number, b: number) => void;
     readonly __wbg_rustwasmrtpframe_free: (a: number, b: number) => void;
@@ -461,6 +518,10 @@ export interface InitOutput {
     readonly rust_avcc_to_annex_b: (a: number, b: number) => [number, number];
     readonly rust_build_avcc: (a: number, b: number, c: number, d: number) => [number, number];
     readonly rust_build_hvcc: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+    readonly rustaudiodsp_downmix_51_to_stereo: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly rustaudiodsp_downmix_stereo_to_mono: (a: number, b: number) => [number, number, number, number];
+    readonly rustaudiodsp_resample: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly rustaudiodsp_upmix_mono_to_stereo: (a: number, b: number) => [number, number];
     readonly rustcpufilter_adjust_brightness_contrast: (a: number, b: number, c: any, d: number, e: number) => void;
     readonly rustcpufilter_grayscale_rgba: (a: number, b: number, c: any) => void;
     readonly rustcpufilter_invert_rgba: (a: number, b: number, c: any) => void;
@@ -482,6 +543,15 @@ export interface InitOutput {
     readonly rustflvdemuxer_demux_next_packet: (a: number) => number;
     readonly rustflvdemuxer_new: () => number;
     readonly rustflvdemuxer_parse_header: (a: number) => number;
+    readonly rustmkvdemuxer_frame_count: (a: number) => number;
+    readonly rustmkvdemuxer_get_frame_data: (a: number, b: number) => [number, number];
+    readonly rustmkvdemuxer_get_frame_pts_us: (a: number, b: number) => [number, number];
+    readonly rustmkvdemuxer_get_track_codec: (a: number, b: number) => [number, number];
+    readonly rustmkvdemuxer_get_track_type: (a: number, b: number) => number;
+    readonly rustmkvdemuxer_get_video_dimensions: (a: number, b: number) => any;
+    readonly rustmkvdemuxer_is_frame_keyframe: (a: number, b: number) => number;
+    readonly rustmkvdemuxer_new: (a: number, b: number) => [number, number, number];
+    readonly rustmkvdemuxer_track_count: (a: number) => number;
     readonly ruststreamanalyzer_analyze_packet: (a: number, b: number, c: number) => [number, number];
     readonly ruststreamanalyzer_get_avcc_description: (a: number) => [number, number];
     readonly ruststreamanalyzer_get_description: (a: number) => [number, number];
@@ -489,6 +559,10 @@ export interface InitOutput {
     readonly ruststreamanalyzer_is_hevc: (a: number) => number;
     readonly ruststreamanalyzer_is_keyframe: (a: number, b: number, c: number) => number;
     readonly ruststreamanalyzer_new: () => number;
+    readonly rustwasmfiltergraph_get_node_name: (a: number, b: number) => [number, number];
+    readonly rustwasmfiltergraph_get_node_target: (a: number, b: number) => [number, number];
+    readonly rustwasmfiltergraph_new: (a: number, b: number) => [number, number, number];
+    readonly rustwasmfiltergraph_node_count: (a: number) => number;
     readonly rustwasmmp4muxer_finalize: (a: number) => [number, number];
     readonly rustwasmmp4muxer_new: () => number;
     readonly rustwasmmp4muxer_set_audio_track: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
@@ -521,6 +595,8 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_start: () => void;
 }
 

@@ -490,6 +490,88 @@ export const PixelFormat = Object.freeze({
 });
 
 /**
+ * Pure Rust Audio DSP & Resampling Engine WASM Bridge.
+ */
+export class RustAudioDsp {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustAudioDspFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustaudiodsp_free(ptr, 0);
+    }
+    /**
+     * Downmix 5.1 Surround f32 PCM audio to Stereo [L, R] using ITU-R BS.775.
+     * @param {Float32Array} input
+     * @param {boolean} include_lfe
+     * @returns {Float32Array}
+     */
+    static downmix_51_to_stereo(input, include_lfe) {
+        const ptr0 = passArrayF32ToWasm0(input, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustaudiodsp_downmix_51_to_stereo(ptr0, len0, include_lfe);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
+    }
+    /**
+     * Downmix Stereo [L, R] to Mono [M].
+     * @param {Float32Array} input
+     * @returns {Float32Array}
+     */
+    static downmix_stereo_to_mono(input) {
+        const ptr0 = passArrayF32ToWasm0(input, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustaudiodsp_downmix_stereo_to_mono(ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
+    }
+    /**
+     * Resample interleaved f32 PCM audio between sample rates.
+     * @param {Float32Array} input
+     * @param {number} from_rate
+     * @param {number} to_rate
+     * @param {number} channels
+     * @returns {Float32Array}
+     */
+    static resample(input, from_rate, to_rate, channels) {
+        const ptr0 = passArrayF32ToWasm0(input, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustaudiodsp_resample(ptr0, len0, from_rate, to_rate, channels);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
+    }
+    /**
+     * Upmix Mono to Stereo [L, R].
+     * @param {Float32Array} input
+     * @returns {Float32Array}
+     */
+    static upmix_mono_to_stereo(input) {
+        const ptr0 = passArrayF32ToWasm0(input, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustaudiodsp_upmix_mono_to_stereo(ptr0, len0);
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
+    }
+}
+if (Symbol.dispose) RustAudioDsp.prototype[Symbol.dispose] = RustAudioDsp.prototype.free;
+
+/**
  * Pure Rust CPU image processing filters.
  * Designed with chunked iterators to allow LLVM to auto-vectorize with WASM SIMD128.
  */
@@ -733,6 +815,109 @@ export class RustFlvDemuxer {
 if (Symbol.dispose) RustFlvDemuxer.prototype[Symbol.dispose] = RustFlvDemuxer.prototype.free;
 
 /**
+ * Pure Rust Matroska (MKV) & WebM Demuxer WASM Bridge.
+ */
+export class RustMkvDemuxer {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustMkvDemuxerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustmkvdemuxer_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    frame_count() {
+        const ret = wasm.rustmkvdemuxer_frame_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} index
+     * @returns {Uint8Array | undefined}
+     */
+    get_frame_data(index) {
+        const ret = wasm.rustmkvdemuxer_get_frame_data(this.__wbg_ptr, index);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * @param {number} index
+     * @returns {number | undefined}
+     */
+    get_frame_pts_us(index) {
+        const ret = wasm.rustmkvdemuxer_get_frame_pts_us(this.__wbg_ptr, index);
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * @param {number} index
+     * @returns {string | undefined}
+     */
+    get_track_codec(index) {
+        const ret = wasm.rustmkvdemuxer_get_track_codec(this.__wbg_ptr, index);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * @param {number} index
+     * @returns {number | undefined}
+     */
+    get_track_type(index) {
+        const ret = wasm.rustmkvdemuxer_get_track_type(this.__wbg_ptr, index);
+        return ret === 0xFFFFFF ? undefined : ret;
+    }
+    /**
+     * @param {number} index
+     * @returns {Uint32Array | undefined}
+     */
+    get_video_dimensions(index) {
+        const ret = wasm.rustmkvdemuxer_get_video_dimensions(this.__wbg_ptr, index);
+        return ret;
+    }
+    /**
+     * @param {number} index
+     * @returns {boolean}
+     */
+    is_frame_keyframe(index) {
+        const ret = wasm.rustmkvdemuxer_is_frame_keyframe(this.__wbg_ptr, index);
+        return ret !== 0;
+    }
+    /**
+     * @param {Uint8Array} data
+     */
+    constructor(data) {
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustmkvdemuxer_new(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        RustMkvDemuxerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {number}
+     */
+    track_count() {
+        const ret = wasm.rustmkvdemuxer_track_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+}
+if (Symbol.dispose) RustMkvDemuxer.prototype[Symbol.dispose] = RustMkvDemuxer.prototype.free;
+
+/**
  * Rust-native stream feeder with in-band parameter set extraction (H.264 avcC & H.265 hvcC + HDR10).
  */
 export class RustStreamAnalyzer {
@@ -824,6 +1009,70 @@ export class RustStreamAnalyzer {
     }
 }
 if (Symbol.dispose) RustStreamAnalyzer.prototype[Symbol.dispose] = RustStreamAnalyzer.prototype.free;
+
+/**
+ * FFmpeg-style Filtergraph Parser WASM Bridge.
+ */
+export class RustWasmFilterGraph {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RustWasmFilterGraphFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_rustwasmfiltergraph_free(ptr, 0);
+    }
+    /**
+     * @param {number} index
+     * @returns {string | undefined}
+     */
+    get_node_name(index) {
+        const ret = wasm.rustwasmfiltergraph_get_node_name(this.__wbg_ptr, index);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * @param {number} index
+     * @returns {string | undefined}
+     */
+    get_node_target(index) {
+        const ret = wasm.rustwasmfiltergraph_get_node_target(this.__wbg_ptr, index);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * @param {string} filter_str
+     */
+    constructor(filter_str) {
+        const ptr0 = passStringToWasm0(filter_str, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.rustwasmfiltergraph_new(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        RustWasmFilterGraphFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {number}
+     */
+    node_count() {
+        const ret = wasm.rustwasmfiltergraph_node_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+}
+if (Symbol.dispose) RustWasmFilterGraph.prototype[Symbol.dispose] = RustWasmFilterGraph.prototype.free;
 
 /**
  * WASM-exported MP4 Muxer with FastStart streaming support.
@@ -1319,8 +1568,20 @@ function __wbg_get_imports() {
             const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg_new_with_length_867011e49634d0b3: function(arg0) {
+            const ret = new Uint32Array(arg0 >>> 0);
+            return ret;
+        },
         __wbg_push_bfdf956ba476f65b: function(arg0, arg1) {
             const ret = arg0.push(arg1);
+            return ret;
+        },
+        __wbg_set_index_c45581b254bc5f37: function(arg0, arg1, arg2) {
+            arg0[arg1 >>> 0] = arg2 >>> 0;
+        },
+        __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(String) -> Externref`.
+            const ret = getStringFromWasm0(arg0, arg1);
             return ret;
         },
         __wbindgen_init_externref_table: function() {
@@ -1357,6 +1618,9 @@ const JitterBufferConfigFinalization = (typeof FinalizationRegistry === 'undefin
 const PacketFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_packet_free(ptr, 1));
+const RustAudioDspFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustaudiodsp_free(ptr, 1));
 const RustCpuFilterFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustcpufilter_free(ptr, 1));
@@ -1366,9 +1630,15 @@ const RustDemuxerFinalization = (typeof FinalizationRegistry === 'undefined')
 const RustFlvDemuxerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustflvdemuxer_free(ptr, 1));
+const RustMkvDemuxerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustmkvdemuxer_free(ptr, 1));
 const RustStreamAnalyzerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_ruststreamanalyzer_free(ptr, 1));
+const RustWasmFilterGraphFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_rustwasmfiltergraph_free(ptr, 1));
 const RustWasmMp4MuxerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_rustwasmmp4muxer_free(ptr, 1));
@@ -1391,9 +1661,22 @@ function _assertClass(instance, klass) {
     }
 }
 
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -1419,6 +1702,56 @@ function passArray8ToWasm0(arg, malloc) {
     return ptr;
 }
 
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passStringToWasm0(arg, malloc, realloc) {
+    if (realloc === undefined) {
+        const buf = cachedTextEncoder.encode(arg);
+        const ptr = malloc(buf.length, 1) >>> 0;
+        getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+        WASM_VECTOR_LEN = buf.length;
+        return ptr;
+    }
+
+    let len = arg.length;
+    let ptr = malloc(len, 1) >>> 0;
+
+    const mem = getUint8ArrayMemory0();
+
+    let offset = 0;
+
+    for (; offset < len; offset++) {
+        const code = arg.charCodeAt(offset);
+        if (code > 0x7F) break;
+        mem[ptr + offset] = code;
+    }
+    if (offset !== len) {
+        if (offset !== 0) {
+            arg = arg.slice(offset);
+        }
+        ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+        const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+        const ret = cachedTextEncoder.encodeInto(arg, view);
+
+        offset += ret.written;
+        ptr = realloc(ptr, len, offset, 1) >>> 0;
+    }
+
+    WASM_VECTOR_LEN = offset;
+    return ptr;
+}
+
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_externrefs.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
+}
+
 let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
 cachedTextDecoder.decode();
 const MAX_SAFARI_DECODE_BYTES = 2146435072;
@@ -1433,6 +1766,19 @@ function decodeText(ptr, len) {
     return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
 }
 
+const cachedTextEncoder = new TextEncoder();
+
+if (!('encodeInto' in cachedTextEncoder)) {
+    cachedTextEncoder.encodeInto = function (arg, view) {
+        const buf = cachedTextEncoder.encode(arg);
+        view.set(buf);
+        return {
+            read: arg.length,
+            written: buf.length
+        };
+    };
+}
+
 let WASM_VECTOR_LEN = 0;
 
 let wasmModule, wasmInstance, wasm;
@@ -1440,6 +1786,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedFloat32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod bitstream;
 pub mod demuxer;
 pub mod engine;
@@ -8,6 +9,10 @@ pub mod muxer;
 pub mod packet;
 pub mod timeline;
 
+pub use audio::{
+    mix_51_to_stereo, mix_channels, mix_mono_to_stereo, mix_stereo_to_mono, resample_linear,
+    soft_clip, AudioResampler, ChannelLayout, MixerError, ResampleError, ResamplerConfig,
+};
 pub use bitstream::{
     annex_b_to_avcc, avcc_to_annex_b, build_adts_header, build_audio_specific_config,
     build_av1c_config, build_avcc, build_hvcc, decode_leb128, parse_adts_header,
@@ -16,11 +21,14 @@ pub use bitstream::{
     HevcNalUnitType, HevcSpsInfo, NalUnit, NalUnitType, ObuType, ObuUnit, SpsInfo,
 };
 pub use demuxer::{
-    Mp4Demuxer, RustDemuxedSample, RustDemuxedTrack, TsDemuxedSample, TsDemuxer,
-    TsElementaryStream, TsStreamKind,
+    demux_mkv, MkvDemuxError, MkvDemuxResult, MkvFrame, MkvTrack, Mp4Demuxer, RustDemuxedSample,
+    RustDemuxedTrack, TsDemuxedSample, TsDemuxer, TsElementaryStream, TsStreamKind,
 };
 pub use engine::{create_rust_packet, create_rust_timeline, RustDemuxer, RustStreamAnalyzer, RustWasmMp4Muxer};
-pub use filter::RustCpuFilter;
+pub use filter::{
+    negotiate_filter_target, parse_filtergraph, FilterGraph, FilterNode, FilterParseError,
+    FilterTarget, RustCpuFilter,
+};
 pub use frame::{ColorSpace, FrameMetadata, PixelFormat};
 pub use live::{FlvHeader, FlvVideoTagInfo, JitterBuffer, JitterBufferConfig, RustFlvDemuxer};
 pub use muxer::{AudioTrackConfig, RustMp4Muxer, VideoCodec, VideoTrackConfig};
