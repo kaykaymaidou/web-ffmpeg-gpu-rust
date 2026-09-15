@@ -1,0 +1,21 @@
+{
+  "name": "web-ffmpeg-gpu-cli",
+  "version": "0.1.0",
+  "description": "Next-Gen Web-FFmpeg Universal High-Performance CLI Tool (wff)",
+  "type": "module",
+  "bin": {
+    "wff": "./dist/index.js",
+    "web-ffmpeg": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@web-ffmpeg-gpu/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "typescript": "^5.7.0"
+  }
+}

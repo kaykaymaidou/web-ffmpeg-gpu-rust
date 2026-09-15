@@ -34,10 +34,25 @@ export async function loadRustCore(): Promise<RustCoreModule> {
         // Node.js environment (e.g. Playwright test runner, CLI, SSR)
         const fs = await import('node:fs');
         const { fileURLToPath } = await import('node:url');
-        const wasmPath = fileURLToPath(
-          new URL('../../pkg/web_ffmpeg_core_bg.wasm', import.meta.url)
-        );
-        moduleOrPath = fs.readFileSync(wasmPath);
+        const candidates = [
+          new URL('../../pkg/web_ffmpeg_core_bg.wasm', import.meta.url),
+          new URL('../../../packages/core/pkg/web_ffmpeg_core_bg.wasm', import.meta.url),
+          new URL('../../packages/core/pkg/web_ffmpeg_core_bg.wasm', import.meta.url),
+          new URL('../packages/core/pkg/web_ffmpeg_core_bg.wasm', import.meta.url),
+          new URL('./web_ffmpeg_core_bg.wasm', import.meta.url),
+        ];
+        let foundPath: string | null = null;
+        for (const cand of candidates) {
+          const p = fileURLToPath(cand);
+          if (fs.existsSync(p)) {
+            foundPath = p;
+            break;
+          }
+        }
+        if (!foundPath) {
+          throw new Error('Could not find web_ffmpeg_core_bg.wasm in any candidate path');
+        }
+        moduleOrPath = fs.readFileSync(foundPath);
       } else {
         // Browser / Vite environment
         moduleOrPath = new URL('../../pkg/web_ffmpeg_core_bg.wasm', import.meta.url).href;
