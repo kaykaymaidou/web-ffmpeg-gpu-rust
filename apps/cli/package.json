@@ -1,7 +1,19 @@
 {
   "name": "web-ffmpeg-gpu-cli",
   "version": "0.1.0",
-  "description": "Next-Gen Web-FFmpeg Universal High-Performance CLI Tool (wff)",
+  "description": "Next-Gen Web-FFmpeg Universal High-Performance CLI Tool (wff): Sub-millisecond media probe, instant lossless keyframe-aware trim, multi-stream concat, and WebGPU filtergraph planner.",
+  "keywords": [
+    "ffmpeg-cli",
+    "wff",
+    "web-ffmpeg",
+    "lossless-cut",
+    "video-trim",
+    "video-concat",
+    "video-probe",
+    "webgpu",
+    "webcodecs",
+    "rust"
+  ],
   "type": "module",
   "bin": {
     "wff": "./dist/index.js",

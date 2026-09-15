@@ -11,7 +11,10 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Web-FFmpeg-GPU Contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/web-ffmpeg-gpu/web-ffmpeg-gpu"
+repository = "https://github.com/kaykaymaidou/web-ffmpeg-gpu-rust"
+description = "High-performance Zero-OS-I/O media core for Web-FFmpeg: demuxers, muxers, bitstream parsers, audio DSP, and filtergraphs"
+keywords = ["ffmpeg", "video", "webgpu", "webcodecs", "demuxer"]
+categories = ["multimedia::video", "multimedia::audio", "encoding"]
 
 [profile.release]
 opt-level = 3
