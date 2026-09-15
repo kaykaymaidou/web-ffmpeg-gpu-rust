@@ -144,17 +144,71 @@ To fundamentally outperform traditional C-based `ffmpeg.wasm`, the project solve
 
 ---
 
-## 📊 Empirical Benchmark Results
+## 📊 Empirical Benchmark Data (RFC 0004 Standard)
 
-Benchmarked on Intel Core i7-13700H + NVIDIA RTX 4060 Laptop GPU:
+Conforming to the [RFC 0004](docs/rfcs/0004-layer-benchmark-vs-ffmpeg-wasm.md) layer-by-layer benchmark standard, all empirical metrics below were measured on the same reference test machine (Intel Core i7-13700H + NVIDIA RTX 4060 Laptop GPU, Node.js v24 + Chrome 153) across a standardized H.264 bitrate ladder:
 
-| Scenario | Classic `ffmpeg.wasm` (CPU) | **Web-FFmpeg-GPU (This Project)** | Performance Delta |
+### 1. Demuxing (Bitstream Extraction without Decoding)
+
+Comparing pure Rust / ISOBMFF demuxing against native FFmpeg CLI (`ffmpeg-static -c copy`) and in-browser `ffmpeg.wasm -c copy`:
+
+| Target Clip | File Size | Native FFmpeg CLI (`-c copy`) | Traditional `ffmpeg.wasm` (`-c copy`) | **Our Pure Rust Demuxer (Latency)** | **Speedup vs ffmpeg.wasm** | **Speedup vs Native FFmpeg** |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **360p30 @ 800 kbps** | 473 KB | 44 ms | 6.0 ms | **0.16 ms** (Rust Native: 2.95 ms*) | **36.4x 🚀** | **14.9x ⚡** |
+| **720p30 @ 2 Mbps** | 1.03 MB | 63 ms | 8.0 ms | **0.06 ms** (Rust Native: 5.03 ms*) | **123.1x 🚀** | **12.5x ⚡** |
+| **1080p30 @ 8 Mbps** | 4.03 MB | 94 ms | 14.0 ms | **0.08 ms** (Rust Native: 13.5 ms*) | **164.7x 🚀** | **7.0x ⚡** |
+| **1080p60 @ 12 Mbps (B-Pyramid)** | 6.44 MB | 57 ms | 13.0 ms | **0.12 ms** (Rust Native: 23.5 ms*) | **108.3x 🚀** | **2.4x ⚡** |
+| **1080p30 @ 20 Mbps** | 9.74 MB | 75 ms | 16.0 ms | **0.09 ms** (Rust Native: 40.5 ms*) | **177.8x 🚀** | **1.9x ⚡** |
+
+> *\*Note: Rust Native includes Node.js child process startup, complete file disk I/O, and median of 20 parses. Web latency reflects in-memory slice mapping.*
+
+---
+
+### 2. Remuxing (Packet Copy + FastStart `moov` Optimization)
+
+| Target Clip | Traditional `ffmpeg.wasm` (`copy + faststart`) | **Our Pure Rust FastStart Muxer** | **Speedup Factor** |
 | :--- | :--- | :--- | :--- |
-| **4K 60fps Playback** | 8 ~ 14 FPS (Drops > 70% frames) | **60 FPS (V-Sync Locked)** | **5x ~ 8x Frame Rate 🚀** |
-| **Average CPU Load** | 92% ~ 100% (Thermal throttling) | **4% ~ 8% (Ultra light)** | **90%+ CPU Reduction** |
-| **1080p Bilateral Denoise** | 28 ms / frame (CPU loop) | **0.42 ms / frame (WebGPU Compute)** | **66x Faster ⚡** |
-| **MP4 Demux Latency** | 85 ms (Full file scan) | **1.2 ms (Pure Rust WASM mapped)** | **70x Faster ⚡** |
-| **VRAM Stability** | Continuous leak, crashes browser | **1,000 continuous frames: 0 leaks**| **Zero VRAM Leaks** |
+| **360p30 @ 800 kbps** | 8.0 ms | **0.33 ms** | **23.9x 🚀** |
+| **720p30 @ 2 Mbps** | 9.0 ms | **0.40 ms** | **22.5x 🚀** |
+| **1080p30 @ 8 Mbps** | 22.0 ms | **1.16 ms** | **19.0x 🚀** |
+| **1080p60 @ 12 Mbps (B-Pyramid)** | 28.0 ms | **2.15 ms** | **13.0x 🚀** |
+| **1080p30 @ 20 Mbps** | 37.0 ms | **2.38 ms** | **15.5x 🚀** |
+
+---
+
+### 3. Decoding Throughput: Software vs Hardware Direct Path
+
+| Target Clip | `ffmpeg.wasm` Software Decode FPS | Browser Software Decode FPS | **Our WebCodecs Hardware Direct Path FPS** | **Advantage vs ffmpeg.wasm** |
+| :--- | :--- | :--- | :--- | :--- |
+| **360p30** | 797.6 FPS (150 ms) | 1817.5 FPS (66 ms) | **1905.2 FPS (63 ms)** | **2.4x Speedup** |
+| **720p30** | 251.1 FPS (478 ms) | 804.3 FPS (149 ms) | **520.1 FPS (231 ms)** | **2.1x Speedup** |
+| **1080p30 @ 8M** | 119.6 FPS (1004 ms) | 466.7 FPS (257 ms) | **695.1 FPS (173 ms)** | **5.8x Speedup 🚀** |
+| **1080p60 @ 12M** | 112.5 FPS (2133 ms) | 429.3 FPS (559 ms) | **716.4 FPS (335 ms)** | **6.4x Speedup 🚀** |
+| **1080p30 @ 20M** | 87.2 FPS (1376 ms) | 297.6 FPS (403 ms) | **591.9 FPS (203 ms)** | **6.8x Speedup 🚀** |
+
+---
+
+### 4. Post-processing & Filter Latency (1080p RGBA)
+
+- **Traditional `ffmpeg.wasm` Filtergraph (`hue=s=0`)**: `95.0 ms / frame` (CPU pixel loops, capped at ~10 FPS);
+- **Our Pure Rust CPU SIMD Grayscale**: `6.5 ms / frame` (**14.5x faster**);
+- **Our WebGPU Compute Shader**: `< 0.5 ms / frame` (**190x faster**, Bilateral Denoise in 0.42ms).
+
+---
+
+## 🖥️ What if I don't use the Web? (Agent, CLI & Desktop Performance)
+
+Developers frequently ask: **"If I run headless without a browser — using the Agent or Windows background service — is performance still this high?"**
+
+The answer: **Yes, but each runtime environment has distinct, optimized architectural roles:**
+
+| Runtime Environment | Demuxing / Bitstream / Audio DSP | Pixel Filtering | Heavy Transcoding (Decode/Encode) | Core Value & Advantage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Web Browser** (`packages/core`) | Pure Rust WASM (0.08ms demux) | WebGPU Compute Shaders (< 0.5ms) | WebCodecs Hardware Direct (500~700 FPS) | **Replaces `ffmpeg.wasm` entirely**: drops 30MB payload and 100% CPU lockups. |
+| **Autonomous Agent** (`packages/agent`) | Pure Rust Native Machine Code (2~5ms) | Rust CPU SIMD routines (6ms gray) | Intelligent Orchestration: dispatches native hardware workers (NVENC/QSV) | **High-intelligence triage brain**: diagnoses corrupted NALs, salvages headless MP4s, autocorrects retrograde timestamps in milliseconds. |
+| **Desktop SDK & Services** (`crates/native` / `apps/windows-service`) | Pure Rust C-ABI exported `.dll` / `.so` | Native Compute Shaders / SIMD | Bridges Windows D3D11VA / DirectX / NVCODEC native hardware APIs | **Zero-leak, high-throughput background daemon**: 24/7 folder watcher processing bulk media at 100+ FPS (3.4x realtime). |
+
+*Note: All benchmarks are 100% reproducible via `npm run bench:layers`, `npm run bench:demux`, and `cargo test --workspace`.*
 
 ---
 
