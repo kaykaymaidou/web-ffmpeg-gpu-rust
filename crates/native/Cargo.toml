@@ -1,0 +1,17 @@
+[package]
+name = "web-ffmpeg-native"
+version = "0.1.0"
+edition = "2021"
+authors = ["Web-FFmpeg-GPU Contributors"]
+license = "MIT OR Apache-2.0"
+description = "Native Desktop SDK and C-ABI export layer for Web-FFmpeg Core"
+
+[lib]
+name = "web_ffmpeg_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+web-ffmpeg-core = { path = "../core" }
+
+[features]
+default = []

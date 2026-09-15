@@ -8,7 +8,14 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
+    fs: {
+      allow: ['../..'],
+    },
   },
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+  },
+  assetsInclude: ['**/*.wasm'],
   resolve: {
     alias: {
       '@web-ffmpeg-gpu/core': resolve(__dirname, '../../packages/core/src/index.ts'),

@@ -21,15 +21,20 @@ interface MuxerSample {
   relativeOffset: number;
 }
 
+interface ChunkRun {
+  sampleCount: number;
+  relativeOffset: number;
+}
+
 /**
  * Pure TypeScript & ISOBMFF compliant MP4 Muxer with FastStart streaming order.
  * Places `moov` box before `mdat` box for progressive web playback.
+ * Contiguous samples of the same track collapse to one chunk (one stco entry).
  */
 export class FastStartMp4Muxer {
   private videoTrack: MuxerVideoTrack | null = null;
   private audioTrack: MuxerAudioTrack | null = null;
   private samples: MuxerSample[] = [];
-  private mdatPayload: Uint8Array[] = [];
   private totalPayloadBytes: number = 0;
 
   public setVideoTrack(track: MuxerVideoTrack): void {
@@ -49,7 +54,6 @@ export class FastStartMp4Muxer {
       relativeOffset: this.totalPayloadBytes,
     };
     this.samples.push(sample);
-    this.mdatPayload.push(data);
     this.totalPayloadBytes += data.byteLength;
   }
 
@@ -62,7 +66,6 @@ export class FastStartMp4Muxer {
       relativeOffset: this.totalPayloadBytes,
     };
     this.samples.push(sample);
-    this.mdatPayload.push(data);
     this.totalPayloadBytes += data.byteLength;
   }
 
@@ -100,9 +103,9 @@ export class FastStartMp4Muxer {
     result.set(mdatHeader, offset);
     offset += 8;
 
-    for (const chunk of this.mdatPayload) {
-      result.set(chunk, offset);
-      offset += chunk.byteLength;
+    for (const sample of this.samples) {
+      result.set(sample.data, offset);
+      offset += sample.data.byteLength;
     }
 
     return result;
@@ -220,12 +223,13 @@ export class FastStartMp4Muxer {
 
     // stbl
     const stblChildren: Uint8Array[] = [];
+    const videoRuns = this.chunkRuns(samples);
     stblChildren.push(this.buildStsdVideo(config));
     stblChildren.push(this.buildStts(samples));
     stblChildren.push(this.buildStss(samples));
-    stblChildren.push(this.buildStsc(samples.length));
+    stblChildren.push(this.buildStsc(videoRuns));
     stblChildren.push(this.buildStsz(samples));
-    stblChildren.push(this.buildStco(samples, baseOffset));
+    stblChildren.push(this.buildStco(videoRuns, baseOffset));
 
     minfChildren.push(this.box('stbl', this.concat(stblChildren)));
     mdiaChildren.push(this.box('minf', this.concat(minfChildren)));
@@ -280,11 +284,12 @@ export class FastStartMp4Muxer {
 
     // stbl
     const stblChildren: Uint8Array[] = [];
+    const audioRuns = this.chunkRuns(samples);
     stblChildren.push(this.buildStsdAudio(config));
     stblChildren.push(this.buildStts(samples));
-    stblChildren.push(this.buildStsc(samples.length));
+    stblChildren.push(this.buildStsc(audioRuns));
     stblChildren.push(this.buildStsz(samples));
-    stblChildren.push(this.buildStco(samples, baseOffset));
+    stblChildren.push(this.buildStco(audioRuns, baseOffset));
 
     minfChildren.push(this.box('stbl', this.concat(stblChildren)));
     mdiaChildren.push(this.box('minf', this.concat(minfChildren)));
@@ -449,16 +454,49 @@ export class FastStartMp4Muxer {
     return this.box('stss', payload);
   }
 
-  private buildStsc(sampleCount: number): Uint8Array {
-    if (sampleCount === 0) {
+  private chunkRuns(samples: MuxerSample[]): ChunkRun[] {
+    const runs: ChunkRun[] = [];
+    if (samples.length === 0) {
+      return runs;
+    }
+    let sampleCount = 1;
+    let relativeOffset = samples[0].relativeOffset;
+    for (let i = 1; i < samples.length; i++) {
+      const prev = samples[i - 1];
+      if (samples[i].relativeOffset === prev.relativeOffset + prev.data.byteLength) {
+        sampleCount++;
+      } else {
+        runs.push({ sampleCount, relativeOffset });
+        sampleCount = 1;
+        relativeOffset = samples[i].relativeOffset;
+      }
+    }
+    runs.push({ sampleCount, relativeOffset });
+    return runs;
+  }
+
+  private buildStsc(runs: ChunkRun[]): Uint8Array {
+    if (runs.length === 0) {
       return this.box('stsc', new Uint8Array(8));
     }
-    const payload = new Uint8Array(20);
+    const entries: { firstChunk: number; samplesPerChunk: number }[] = [];
+    for (let i = 0; i < runs.length; i++) {
+      const samplesPerChunk = runs[i].sampleCount;
+      const last = entries[entries.length - 1];
+      if (!last || last.samplesPerChunk !== samplesPerChunk) {
+        entries.push({ firstChunk: i + 1, samplesPerChunk });
+      }
+    }
+    const payload = new Uint8Array(8 + entries.length * 12);
     const view = new DataView(payload.buffer);
-    view.setUint32(4, 1);  // 1 entry
-    view.setUint32(8, 1);  // first chunk
-    view.setUint32(12, 1); // samples per chunk
-    view.setUint32(16, 1); // sample description index
+    view.setUint32(4, entries.length);
+    let offset = 8;
+    for (const entry of entries) {
+      view.setUint32(offset, entry.firstChunk);
+      view.setUint32(offset + 4, entry.samplesPerChunk);
+      view.setUint32(offset + 8, 1);
+      offset += 12;
+    }
     return this.box('stsc', payload);
   }
 
@@ -474,13 +512,13 @@ export class FastStartMp4Muxer {
     return this.box('stsz', payload);
   }
 
-  private buildStco(samples: MuxerSample[], baseOffset: number): Uint8Array {
-    const payload = new Uint8Array(8 + samples.length * 4);
+  private buildStco(runs: ChunkRun[], baseOffset: number): Uint8Array {
+    const payload = new Uint8Array(8 + runs.length * 4);
     const view = new DataView(payload.buffer);
-    view.setUint32(4, samples.length);
+    view.setUint32(4, runs.length);
     let offset = 8;
-    for (const s of samples) {
-      view.setUint32(offset, baseOffset + s.relativeOffset);
+    for (const run of runs) {
+      view.setUint32(offset, baseOffset + run.relativeOffset);
       offset += 4;
     }
     return this.box('stco', payload);

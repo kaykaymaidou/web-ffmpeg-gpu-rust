@@ -1,3 +1,10 @@
+pub mod graph;
+
+pub use graph::{
+    negotiate_filter_target, parse_filtergraph, FilterGraph, FilterNode, FilterParseError,
+    FilterTarget,
+};
+
 use wasm_bindgen::prelude::*;
 
 /// Pure Rust CPU image processing filters.

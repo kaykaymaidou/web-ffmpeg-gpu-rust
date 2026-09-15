@@ -23,6 +23,11 @@ export {
   type MultiCompositorOptions,
 } from './renderer/multi-compositor';
 export { SimpleMp4Demuxer, type DemuxedTrack, type DemuxedSample } from './demuxer/mp4-demuxer';
+export { WebmDemuxer, type WebmTrackInfo, type WebmSample } from './demuxer/webm-demuxer';
+export { AudioDsp, type AudioResampleOptions } from './audio/audio-dsp';
+export { FilterGraphPlanner, type FilterNodePlan } from './filter/filtergraph';
+export { grayscaleRgbaInPlace } from './filter/cpu-grayscale';
+export { loadRustCore, getRustEngineVersion, type RustCoreModule } from './wasm/rust-core';
 export { StreamFeeder, type StreamPacket } from './stream/feeder';
 export { FILTERS_WGSL } from './shaders/filters.wgsl';
 export { COMPOSITOR_WGSL } from './shaders/compositor.wgsl';
@@ -42,4 +47,5 @@ export type {
   ErrorCallback,
 } from './types';
 export * from './live';
+
 

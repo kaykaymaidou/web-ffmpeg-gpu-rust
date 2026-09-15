@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@web-ffmpeg-gpu/core": "*",
-    "@web-ffmpeg-gpu/agent": "*"
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@web-ffmpeg-gpu/agent": "*",
+    "@web-ffmpeg-gpu/core": "*"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.72",

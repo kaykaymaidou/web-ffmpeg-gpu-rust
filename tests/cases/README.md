@@ -16,6 +16,10 @@ FFmpeg 能够成为音视频领域事实标准的关键，在于其经历过全�
 | **CASE-05** | **HDR / 10-bit 色彩失真** | iPhone HDR (Dolby Vision / HLG / PQ) 视频 | 直接转码后画面严重发白、褪色、过曝 | WebGPU 自动着色器执行 Reinhard / ACES Tone Mapping |
 | **CASE-06** | **异常截断与容错** | `moov` 位于末尾且被截断、丢失 SPS/PPS、缺失 I 帧开头 | 浏览器进程崩溃、WASM panic 抛异常未捕获 | Rust 解复用器优雅返回 Err，不 panic，抛出可读诊断 |
 | **CASE-07** | **极限高码率与显存压测** | 4K 60fps 60Mbps 运动极限视频连续转码 10 分钟 | WebCodecs `VideoFrame` 显存爆满、GPU 驱动重置 (TDR) | 背压控制机制 (Backpressure)，限制同时挂起的 GPU 帧数 <= 5 |
+| **CASE-08** | **WHIP/WHEP 信令协议** | Link ice-server、trickle-ice-sdpfrag、相对 Location、PATCH 405、Bearer 401 | 错误 Content-Type / 丢 Location / 401 仍占用 PeerConnection | RFC 9725 握手字段完整，401 立即失败 |
+| **CASE-09** | **WHIP Loopback 推流** | 同页 Loopback 网关 + 合成 Canvas Track | ICE 失败、无 outbound RTP | `connectionState=connected` 且 bytesSent > 0 |
+| **CASE-10** | **WHEP Loopback 拉流** | WHIP 发布后再 WHEP 订阅 | 无远端 Track、画面全黑 | inbound framesDecoded 或 bytesReceived > 0 |
+| **CASE-11** | **DELETE 优雅下线** | stop() 必须 DELETE Location 再 close PC | 服务器会话泄漏、本地 PC 悬挂 | DELETE 已发出，PC `closed` |
 
 ---
 

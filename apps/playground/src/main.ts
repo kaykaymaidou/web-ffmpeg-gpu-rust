@@ -2,6 +2,11 @@ import {
   WebFfmpegEngine,
   WebFfmpegTranscoder,
   SimpleMp4Demuxer,
+  FastStartMp4Muxer,
+  HardwareVideoDecoder,
+  grayscaleRgbaInPlace,
+  loadRustCore,
+  getRustEngineVersion,
   WebGpuComputeEngine,
   LiveLoopbackSession,
   LiveP2PSender,
@@ -16,11 +21,30 @@ import {
   WebGpuMultiStreamCompositor,
   MultiTrackAudioMixer,
   MultiPeerMeshSession,
+  WhipClient,
+  WhepClient,
+  LoopbackWhipWhepGateway,
+  parseIceServerLinks,
+  buildTrickleIceSdpfrag,
+  parseTrickleIceSdpfrag,
+  extractIceCredentials,
+  resolveResourceUrl,
+  WishHttpClient,
+  WishProtocolError,
   type MeshPeerRole,
+  type WhipClientMetrics,
+  type WhepClientMetrics,
 } from '@web-ffmpeg-gpu/core';
 import { MediaAutopilotAgent, type AgentThoughtStep, type AutopilotDirective } from '@web-ffmpeg-gpu/agent';
 import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, TranscodeResult } from '@web-ffmpeg-gpu/core';
 
+(window as any).WebFfmpegTranscoder = WebFfmpegTranscoder;
+(window as any).SimpleMp4Demuxer = SimpleMp4Demuxer;
+(window as any).FastStartMp4Muxer = FastStartMp4Muxer;
+(window as any).HardwareVideoDecoder = HardwareVideoDecoder;
+(window as any).grayscaleRgbaInPlace = grayscaleRgbaInPlace;
+(window as any).loadRustCore = loadRustCore;
+(window as any).getRustEngineVersion = getRustEngineVersion;
 (window as any).WebGpuComputeEngine = WebGpuComputeEngine;
 (window as any).WebGpuMultiStreamCompositor = WebGpuMultiStreamCompositor;
 (window as any).MultiTrackAudioMixer = MultiTrackAudioMixer;
@@ -36,6 +60,20 @@ import type { FilterMode, FilterSettings, PlaybackMetrics, TranscodePreset, Tran
 (window as any).OpusRtpDemuxer = OpusRtpDemuxer;
 (window as any).WebAudioLivePlayer = WebAudioLivePlayer;
 (window as any).MediaAutopilotAgent = MediaAutopilotAgent;
+(window as any).WhipClient = WhipClient;
+(window as any).WhepClient = WhepClient;
+(window as any).LoopbackWhipWhepGateway = LoopbackWhipWhepGateway;
+(window as any).parseIceServerLinks = parseIceServerLinks;
+(window as any).buildTrickleIceSdpfrag = buildTrickleIceSdpfrag;
+(window as any).parseTrickleIceSdpfrag = parseTrickleIceSdpfrag;
+(window as any).extractIceCredentials = extractIceCredentials;
+(window as any).resolveResourceUrl = resolveResourceUrl;
+(window as any).WishHttpClient = WishHttpClient;
+(window as any).WishProtocolError = WishProtocolError;
+(window as any).loadFfmpegWasm = async () => {
+  const { createFfmpegWasm } = await import('./ffmpeg-wasm-bench');
+  return createFfmpegWasm();
+};
 
 // DOM Elements
 const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -129,6 +167,20 @@ const metricMeshPackets = document.getElementById('metric-mesh-packets') as HTML
 const metricMeshPli = document.getElementById('metric-mesh-pli') as HTMLSpanElement;
 const metricMeshStatus = document.getElementById('metric-mesh-status') as HTMLSpanElement;
 
+const selectWhipMode = document.getElementById('select-whip-mode') as HTMLSelectElement;
+const inputWhipToken = document.getElementById('input-whip-token') as HTMLInputElement;
+const inputWhipUrl = document.getElementById('input-whip-url') as HTMLInputElement;
+const inputWhepUrl = document.getElementById('input-whep-url') as HTMLInputElement;
+const btnToggleWhip = document.getElementById('btn-toggle-whip') as HTMLButtonElement;
+const btnToggleWhep = document.getElementById('btn-toggle-whep') as HTMLButtonElement;
+const whipStatusBadge = document.getElementById('whip-status-badge') as HTMLSpanElement;
+const whepStatusBadge = document.getElementById('whep-status-badge') as HTMLSpanElement;
+const whepPreview = document.getElementById('whep-preview') as HTMLVideoElement;
+const metricWhipTx = document.getElementById('metric-whip-tx') as HTMLSpanElement;
+const metricWhepRx = document.getElementById('metric-whep-rx') as HTMLSpanElement;
+const metricWhipIce = document.getElementById('metric-whip-ice') as HTMLSpanElement;
+const metricWhipRtt = document.getElementById('metric-whip-rtt') as HTMLSpanElement;
+
 let activeMeshSession: MultiPeerMeshSession | null = null;
 let meshCompositor: WebGpuMultiStreamCompositor | null = null;
 let meshAudioMixer: MultiTrackAudioMixer | null = null;
@@ -144,6 +196,9 @@ const btnAutopilotSimulate = document.getElementById('btn-autopilot-simulate') a
 
 let p2pSender: LiveP2PSender | null = null;
 let p2pReceiver: LiveP2PReceiver | null = null;
+let whipClient: WhipClient | null = null;
+let whepClient: WhepClient | null = null;
+let whipGateway: LoopbackWhipWhepGateway | null = null;
 
 const autopilotAgent = new MediaAutopilotAgent({
   engineMode: 'rules-engine',
@@ -789,6 +844,129 @@ function setupEventListeners() {
       }
     });
 
+    const ensureWhipGateway = (): LoopbackWhipWhepGateway | undefined => {
+      if (selectWhipMode.value !== 'loopback') {
+        return undefined;
+      }
+      if (!whipGateway) {
+        whipGateway = new LoopbackWhipWhepGateway();
+      }
+      inputWhipUrl.value = whipGateway.whipEndpoint;
+      inputWhepUrl.value = whipGateway.whepEndpoint;
+      return whipGateway;
+    };
+
+    selectWhipMode.addEventListener('change', () => {
+      if (selectWhipMode.value === 'loopback') {
+        ensureWhipGateway();
+      }
+    });
+
+    btnToggleWhip.addEventListener('click', async () => {
+      if (whipClient) {
+        await whipClient.stop();
+        whipClient = null;
+        btnToggleWhip.textContent = '▶ WHIP 推流';
+        btnToggleWhip.className = 'btn btn-primary';
+        whipStatusBadge.textContent = 'Idle';
+        whipStatusBadge.style.color = '#cbd5e1';
+        metricWhipTx.textContent = '0 kbps / 0 frames';
+        return;
+      }
+
+      try {
+        btnToggleWhip.disabled = true;
+        btnToggleWhip.textContent = 'WHIP 握手中...';
+        const gateway = ensureWhipGateway();
+        whipClient = new WhipClient({
+          endpoint: inputWhipUrl.value.trim(),
+          token: inputWhipToken.value.trim() || undefined,
+          fetchImpl: gateway?.fetchImpl,
+          width: 640,
+          height: 360,
+          framerate: 30,
+          includeAudio: true,
+          filter: currentFilterSettings,
+          bitrate: 2_500_000,
+          onStateChange: (state: RTCPeerConnectionState) => {
+            whipStatusBadge.textContent = state;
+            whipStatusBadge.style.color = state === 'connected' ? '#34d399' : '#fdba74';
+          },
+          onMetrics: (m: WhipClientMetrics) => {
+            metricWhipTx.textContent = `${m.bitrateKbps} kbps / ${m.framesSent} frames`;
+            metricWhipIce.textContent = `${m.iceConnectionState} ${m.resourceUrl ?? ''}`.trim();
+            const gpu = m.gpuPipelineActive ? `GPU ${m.filteredFrames}` : 'GPU OFF';
+            const wc = m.webCodecsInjectActive ? 'WC ON' : 'WC OFF';
+            metricWhipRtt.textContent = `${m.rttMs} ms / ${gpu} / ${wc}`;
+          },
+          onError: (err: Error) => console.error('[WhipClient]', err),
+        });
+        await whipClient.publish();
+        btnToggleWhip.textContent = '⏹ 停止 WHIP';
+        btnToggleWhip.className = 'btn btn-danger';
+        btnToggleWhip.disabled = false;
+        whipStatusBadge.textContent = 'Publishing';
+        whipStatusBadge.style.color = '#38bdf8';
+      } catch (err: any) {
+        console.error('Failed to start WHIP:', err);
+        alert(`WHIP 推流失败: ${err.message || err}`);
+        whipClient = null;
+        btnToggleWhip.textContent = '▶ WHIP 推流';
+        btnToggleWhip.className = 'btn btn-primary';
+        btnToggleWhip.disabled = false;
+      }
+    });
+
+    btnToggleWhep.addEventListener('click', async () => {
+      if (whepClient) {
+        await whepClient.stop();
+        whepClient = null;
+        whepPreview.style.display = 'none';
+        whepPreview.srcObject = null;
+        btnToggleWhep.textContent = '▶ WHEP 拉流';
+        btnToggleWhep.className = 'btn btn-secondary';
+        whepStatusBadge.textContent = 'Idle';
+        whepStatusBadge.style.color = '#cbd5e1';
+        metricWhepRx.textContent = '0 kbps / 0 frames';
+        return;
+      }
+
+      try {
+        btnToggleWhep.disabled = true;
+        btnToggleWhep.textContent = 'WHEP 握手中...';
+        emptyState.style.display = 'none';
+        const gateway = ensureWhipGateway();
+        whepPreview.style.display = 'block';
+        whepClient = new WhepClient({
+          endpoint: inputWhepUrl.value.trim(),
+          token: inputWhipToken.value.trim() || undefined,
+          fetchImpl: gateway?.fetchImpl,
+          onStateChange: (state: RTCPeerConnectionState) => {
+            whepStatusBadge.textContent = state;
+            whepStatusBadge.style.color = state === 'connected' ? '#34d399' : '#fdba74';
+          },
+          onMetrics: (m: WhepClientMetrics) => {
+            metricWhepRx.textContent = `${m.bitrateKbps} kbps / ${m.framesReceived} frames`;
+          },
+          onError: (err: Error) => console.error('[WhepClient]', err),
+        });
+        await whepClient.play(whepPreview);
+        btnToggleWhep.textContent = '⏹ 停止 WHEP';
+        btnToggleWhep.className = 'btn btn-danger';
+        btnToggleWhep.disabled = false;
+        whepStatusBadge.textContent = 'Playing';
+        whepStatusBadge.style.color = '#a78bfa';
+      } catch (err: any) {
+        console.error('Failed to start WHEP:', err);
+        alert(`WHEP 拉流失败: ${err.message || err}`);
+        whepClient = null;
+        whepPreview.style.display = 'none';
+        btnToggleWhep.textContent = '▶ WHEP 拉流';
+        btnToggleWhep.className = 'btn btn-secondary';
+        btnToggleWhep.disabled = false;
+      }
+    });
+
     // AI Media Autopilot Event Listeners
     selectAutopilotEngine.addEventListener('change', () => {
       autopilotAgent.setEngineMode(selectAutopilotEngine.value as any);
@@ -834,6 +1012,7 @@ function setupEventListeners() {
     if (engine) {
       engine.setFilters(currentFilterSettings);
     }
+    whipClient?.setFilter(currentFilterSettings);
   }
 
   async function loadFile(file: File) {

@@ -70,7 +70,7 @@ export class HardwareVideoDecoder {
 
     this.decoder.configure({
       ...config,
-      hardwareAcceleration: 'prefer-hardware',
+      hardwareAcceleration: config.hardwareAcceleration ?? 'prefer-hardware',
     });
 
     this.isConfigured = true;

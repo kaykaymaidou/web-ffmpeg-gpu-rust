@@ -241,9 +241,10 @@ impl RustMp4Muxer {
         stbl_children.extend_from_slice(&build_stsd_video(config));
         stbl_children.extend_from_slice(&build_stts(samples));
         stbl_children.extend_from_slice(&build_stss(samples));
-        stbl_children.extend_from_slice(&build_stsc(samples.len() as u32));
+        let runs = chunk_runs(samples);
+        stbl_children.extend_from_slice(&build_stsc(&runs));
         stbl_children.extend_from_slice(&build_stsz(samples));
-        stbl_children.extend_from_slice(&build_stco(samples, base_offset));
+        stbl_children.extend_from_slice(&build_stco(&runs, base_offset));
 
         minf_children.extend_from_slice(&write_box(b"stbl", &stbl_children));
         mdia_children.extend_from_slice(&write_box(b"minf", &minf_children));
@@ -273,9 +274,10 @@ impl RustMp4Muxer {
         stbl_children.extend_from_slice(&build_stsd_audio(config));
         stbl_children.extend_from_slice(&build_stts(samples));
         // Audio tracks typically do not have stss (all frames are sync frames)
-        stbl_children.extend_from_slice(&build_stsc(samples.len() as u32));
+        let runs = chunk_runs(samples);
+        stbl_children.extend_from_slice(&build_stsc(&runs));
         stbl_children.extend_from_slice(&build_stsz(samples));
-        stbl_children.extend_from_slice(&build_stco(samples, base_offset));
+        stbl_children.extend_from_slice(&build_stco(&runs, base_offset));
 
         minf_children.extend_from_slice(&write_box(b"stbl", &stbl_children));
         mdia_children.extend_from_slice(&write_box(b"minf", &minf_children));
@@ -667,20 +669,61 @@ fn build_stss(samples: &[&SampleInfo]) -> Vec<u8> {
     write_box(b"stss", &payload)
 }
 
-fn build_stsc(sample_count: u32) -> Vec<u8> {
+struct ChunkRun {
+    sample_count: u32,
+    relative_offset: usize,
+}
+
+fn chunk_runs(samples: &[&SampleInfo]) -> Vec<ChunkRun> {
+    let mut runs = Vec::new();
+    if samples.is_empty() {
+        return runs;
+    }
+
+    let mut sample_count = 1u32;
+    let mut relative_offset = samples[0].relative_offset;
+    for i in 1..samples.len() {
+        let prev = samples[i - 1];
+        if samples[i].relative_offset == prev.relative_offset + prev.size {
+            sample_count += 1;
+        } else {
+            runs.push(ChunkRun {
+                sample_count,
+                relative_offset,
+            });
+            sample_count = 1;
+            relative_offset = samples[i].relative_offset;
+        }
+    }
+    runs.push(ChunkRun {
+        sample_count,
+        relative_offset,
+    });
+    runs
+}
+
+fn build_stsc(runs: &[ChunkRun]) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&[0, 0, 0, 0]); // version + flags
 
-    if sample_count == 0 {
+    if runs.is_empty() {
         payload.extend_from_slice(&0u32.to_be_bytes());
         return write_box(b"stsc", &payload);
     }
 
-    // 1 chunk per sample, each sample uses description 1
-    payload.extend_from_slice(&1u32.to_be_bytes()); // entry_count = 1
-    payload.extend_from_slice(&1u32.to_be_bytes()); // first_chunk = 1
-    payload.extend_from_slice(&1u32.to_be_bytes()); // samples_per_chunk = 1
-    payload.extend_from_slice(&1u32.to_be_bytes()); // sample_description_index = 1
+    let mut entries: Vec<(u32, u32)> = Vec::new();
+    for (i, run) in runs.iter().enumerate() {
+        if entries.last().map(|e| e.1) != Some(run.sample_count) {
+            entries.push((i as u32 + 1, run.sample_count));
+        }
+    }
+
+    payload.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    for (first_chunk, samples_per_chunk) in entries {
+        payload.extend_from_slice(&first_chunk.to_be_bytes());
+        payload.extend_from_slice(&samples_per_chunk.to_be_bytes());
+        payload.extend_from_slice(&1u32.to_be_bytes()); // sample_description_index
+    }
 
     write_box(b"stsc", &payload)
 }
@@ -698,13 +741,13 @@ fn build_stsz(samples: &[&SampleInfo]) -> Vec<u8> {
     write_box(b"stsz", &payload)
 }
 
-fn build_stco(samples: &[&SampleInfo], base_offset: u32) -> Vec<u8> {
+fn build_stco(runs: &[ChunkRun], base_offset: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&[0, 0, 0, 0]); // version + flags
-    payload.extend_from_slice(&(samples.len() as u32).to_be_bytes()); // entry_count
+    payload.extend_from_slice(&(runs.len() as u32).to_be_bytes());
 
-    for s in samples {
-        let abs_offset = base_offset + s.relative_offset as u32;
+    for run in runs {
+        let abs_offset = base_offset + run.relative_offset as u32;
         payload.extend_from_slice(&abs_offset.to_be_bytes());
     }
 
@@ -824,5 +867,59 @@ mod tests {
         assert_eq!(vtrack.samples.len(), 3);
         assert!(vtrack.samples[0].is_key);
         assert!(!vtrack.samples[1].is_key);
+    }
+
+    #[test]
+    fn test_contiguous_track_collapses_to_one_chunk() {
+        let samples = [
+            SampleInfo {
+                is_video: true,
+                is_key: true,
+                duration_ticks: 1000,
+                size: 10,
+                relative_offset: 0,
+            },
+            SampleInfo {
+                is_video: true,
+                is_key: false,
+                duration_ticks: 1000,
+                size: 6,
+                relative_offset: 10,
+            },
+            SampleInfo {
+                is_video: true,
+                is_key: false,
+                duration_ticks: 1000,
+                size: 4,
+                relative_offset: 16,
+            },
+        ];
+        let refs: Vec<&SampleInfo> = samples.iter().collect();
+        let runs = chunk_runs(&refs);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].sample_count, 3);
+        assert_eq!(runs[0].relative_offset, 0);
+
+        let interleaved = [
+            SampleInfo {
+                is_video: true,
+                is_key: true,
+                duration_ticks: 1000,
+                size: 10,
+                relative_offset: 0,
+            },
+            SampleInfo {
+                is_video: true,
+                is_key: false,
+                duration_ticks: 1000,
+                size: 6,
+                relative_offset: 20,
+            },
+        ];
+        let interleaved_refs: Vec<&SampleInfo> = interleaved.iter().collect();
+        let split = chunk_runs(&interleaved_refs);
+        assert_eq!(split.len(), 2);
+        assert_eq!(split[0].sample_count, 1);
+        assert_eq!(split[1].sample_count, 1);
     }
 }

@@ -373,6 +373,68 @@
           </div>
         </div>
 
+        <!-- WHIP / WHEP Broadcast Card -->
+        <div class="card whip-card" style="border-color: #f97316;">
+          <div class="card-title" style="color: #fdba74;">
+            <span>📡 WHIP / WHEP 工业级广播推拉流 (RFC 9725)</span>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">信令模式</label>
+              <select id="select-whip-mode" class="form-select" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;">
+                <option value="loopback">🔁 同页 Loopback 网关 (零服务器)</option>
+                <option value="custom">🌐 自定义 WHIP/WHEP URL</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Bearer Token</label>
+              <input type="text" id="input-whip-token" placeholder="可选" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;" />
+            </div>
+          </div>
+
+          <div style="margin-bottom: 8px;">
+            <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">WHIP 推流 Endpoint</label>
+            <input type="text" id="input-whip-url" value="http://whip.loopback.local/whip" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;" />
+          </div>
+          <div style="margin-bottom: 10px;">
+            <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">WHEP 拉流 Endpoint</label>
+            <input type="text" id="input-whep-url" value="http://whip.loopback.local/whep" style="width: 100%; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px;" />
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button class="btn btn-primary" id="btn-toggle-whip" style="flex: 1; background: #ea580c; border-color: #c2410c;">▶ WHIP 推流</button>
+            <button class="btn btn-secondary" id="btn-toggle-whep" style="flex: 1;">▶ WHEP 拉流</button>
+          </div>
+
+          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">
+            WHIP: <span id="whip-status-badge" style="color: #cbd5e1; font-weight: bold;">Idle</span>
+            &nbsp;|&nbsp;
+            WHEP: <span id="whep-status-badge" style="color: #cbd5e1; font-weight: bold;">Idle</span>
+          </div>
+
+          <video id="whep-preview" muted autoplay playsinline style="width: 100%; max-height: 140px; background: #020617; border-radius: 4px; margin-bottom: 8px; display: none;"></video>
+
+          <div class="transcode-stats" style="margin-top: 6px;">
+            <div class="stat-item">
+              <span class="stat-title">WHIP 发送码率 / 帧</span>
+              <span class="stat-val" id="metric-whip-tx">0 kbps / 0 frames</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">WHEP 接收码率 / 帧</span>
+              <span class="stat-val" id="metric-whep-rx">0 kbps / 0 frames</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">ICE / 资源 URL</span>
+              <span class="stat-val" id="metric-whip-ice" style="color: #fdba74; font-size: 10px;">--</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-title">RTT / Trickle</span>
+              <span class="stat-val" id="metric-whip-rtt" style="color: #34d399;">0 ms / ON</span>
+            </div>
+          </div>
+        </div>
+
         <!-- AI Media Autopilot Cockpit Card -->
         <div class="card autopilot-card" style="border-color: #6366f1;">
           <div class="card-title" style="color: #a5b4fc;">

@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const playgroundPort = process.env.PLAYGROUND_PORT || '3000';
+const playgroundUrl = `http://localhost:${playgroundPort}`;
+
 export default defineConfig({
   testDir: './tests',
   timeout: 45000,
@@ -7,7 +10,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: playgroundUrl,
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
     // Critical flags for WebGPU & WebCodecs hardware acceleration in headless/headed testing
@@ -23,8 +26,9 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
+    command: `npx vite --port ${playgroundPort} --strictPort`,
+    cwd: 'apps/playground',
+    url: playgroundUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },

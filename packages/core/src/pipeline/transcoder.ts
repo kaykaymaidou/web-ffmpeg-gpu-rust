@@ -34,6 +34,7 @@ export interface TranscodeResult {
   avgFps: number;
   avgRealtime: number;
   totalTimeMs: number;
+  decodedFrames: number;
 }
 
 export class WebFfmpegTranscoder {
@@ -261,6 +262,8 @@ export class WebFfmpegTranscoder {
       isSupported = await decoder.configure({
         codec: videoTrack.codec,
         description: videoTrack.description,
+        codedWidth: videoTrack.width,
+        codedHeight: videoTrack.height,
       });
     } catch {
       // Handled in fallback below
@@ -322,18 +325,20 @@ export class WebFfmpegTranscoder {
     const outputSizeBytes = mp4Buffer.byteLength;
     const compressionRatio = Math.round((1 - outputSizeBytes / originalSizeBytes) * 100) / 100;
 
-    const avgFps = Math.round((totalFrames / (totalTimeMs / 1000)) * 10) / 10;
+    const countedFrames = processedFrames > 0 ? processedFrames : totalFrames;
+    const avgFps = Math.round((countedFrames / (totalTimeMs / 1000)) * 10) / 10;
     const avgRealtime = Math.round((avgFps / (options.framerate || 30)) * 10) / 10;
 
     return {
       mp4Buffer,
-      durationSec: Math.round((totalFrames / (options.framerate || 30)) * 10) / 10,
+      durationSec: Math.round((countedFrames / (options.framerate || 30)) * 10) / 10,
       originalSizeBytes,
       outputSizeBytes,
       compressionRatio,
       avgFps,
       avgRealtime,
       totalTimeMs,
+      decodedFrames: processedFrames,
     };
   }
 
