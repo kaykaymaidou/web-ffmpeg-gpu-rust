@@ -153,6 +153,8 @@ export class SimpleMp4Demuxer {
     let sampleSizes: number[] = [];
     let keyframeIndices = new Set<number>();
     let sampleDeltas: number[] = [];
+    const stscEntries: Array<{ firstChunk: number; samplesPerChunk: number }> = [];
+    const cttsOffsets: number[] = [];
     let codecString = 'avc1.640028';
     let trackWidth = 1920;
     let trackHeight = 1080;
@@ -177,13 +179,13 @@ export class SimpleMp4Demuxer {
             while (subOffset < entryOffset + entrySize - 8) {
               const subSize = this.view.getUint32(subOffset);
               const subType = this.getString(subOffset + 4, 4);
-              if (subType === 'avcC') {
+              if (subType === 'avcC' && subSize > 8) {
                 descBytes = new Uint8Array(this.buffer, subOffset + 8, subSize - 8);
                 const profile = descBytes[1].toString(16).padStart(2, '0');
                 const compat = descBytes[2].toString(16).padStart(2, '0');
                 const level = descBytes[3].toString(16).padStart(2, '0');
                 codecString = `avc1.${profile}${compat}${level}`;
-              } else if (subType === 'hvcC') {
+              } else if (subType === 'hvcC' && subSize > 8) {
                 descBytes = new Uint8Array(this.buffer, subOffset + 8, subSize - 8);
                 codecString = 'hvc1.1.6.L93.B0';
               }
@@ -228,30 +230,70 @@ export class SimpleMp4Demuxer {
             sampleDeltas.push(sampleDelta);
           }
         }
+      } else if (type === 'stsc') {
+        const count = this.view.getUint32(offset + 12);
+        for (let i = 0; i < count; i++) {
+          stscEntries.push({
+            firstChunk: this.view.getUint32(offset + 16 + i * 12),
+            samplesPerChunk: this.view.getUint32(offset + 20 + i * 12),
+          });
+        }
+      } else if (type === 'ctts') {
+        const count = this.view.getUint32(offset + 12);
+        for (let i = 0; i < count; i++) {
+          const sampleCount = this.view.getUint32(offset + 16 + i * 8);
+          const compositionOffset = this.view.getInt32(offset + 20 + i * 8);
+          for (let j = 0; j < sampleCount; j++) {
+            cttsOffsets.push(compositionOffset);
+          }
+        }
       }
       offset += size;
     }
 
+    const samplesPerChunkAt = (chunkIndex1Based: number): number => {
+      if (stscEntries.length === 0) {
+        if (chunkOffsets.length <= 1) return sampleSizes.length;
+        return 1;
+      }
+      let samplesPerChunk = stscEntries[0].samplesPerChunk;
+      for (const entry of stscEntries) {
+        if (entry.firstChunk <= chunkIndex1Based) {
+          samplesPerChunk = entry.samplesPerChunk;
+        }
+      }
+      return samplesPerChunk;
+    };
+
     const samples: DemuxedSample[] = [];
-    let currentOffset = chunkOffsets[0] || 0;
-    let currentTimestamp = 0;
+    let sampleIndex = 0;
+    let decodeTicks = 0;
 
-    for (let i = 0; i < sampleSizes.length; i++) {
-      const size = sampleSizes[i];
-      const delta = sampleDeltas[i] || 1000;
-      const durationUs = Math.round((delta / timescale) * 1_000_000);
-      const isKey = keyframeIndices.size === 0 || keyframeIndices.has(i);
-
-      const sampleData = new Uint8Array(this.buffer, currentOffset, size);
-      samples.push({
-        type: isKey ? 'key' : 'delta',
-        timestamp: currentTimestamp,
-        duration: durationUs,
-        data: sampleData,
-      });
-
-      currentTimestamp += durationUs;
-      currentOffset += size;
+    for (let chunk = 0; chunk < chunkOffsets.length && sampleIndex < sampleSizes.length; chunk++) {
+      let byteOffset = chunkOffsets[chunk];
+      const count = samplesPerChunkAt(chunk + 1);
+      for (let s = 0; s < count && sampleIndex < sampleSizes.length; s++) {
+        const size = sampleSizes[sampleIndex];
+        const delta = sampleDeltas[sampleIndex] || 1000;
+        const compositionTicks = cttsOffsets[sampleIndex] || 0;
+        const durationUs = Math.round((delta / timescale) * 1_000_000);
+        const timestamp = Math.round(((decodeTicks + compositionTicks) / timescale) * 1_000_000);
+        const isKey = keyframeIndices.size === 0 || keyframeIndices.has(sampleIndex);
+        const sampleEnd = byteOffset + size;
+        if (sampleEnd > this.view.byteLength) {
+          break;
+        }
+        samples.push({
+          type: isKey ? 'key' : 'delta',
+          timestamp: Math.max(0, timestamp),
+          duration: durationUs,
+          // View into source buffer — matches Rust Mp4Demuxer offset/size. EncodedVideoChunk copies on construct.
+          data: new Uint8Array(this.buffer, byteOffset, size),
+        });
+        byteOffset += size;
+        decodeTicks += delta;
+        sampleIndex++;
+      }
     }
 
     onResult({
@@ -264,6 +306,14 @@ export class SimpleMp4Demuxer {
   }
 
   private getString(start: number, length: number): string {
+    if (length === 4) {
+      return String.fromCharCode(
+        this.view.getUint8(start),
+        this.view.getUint8(start + 1),
+        this.view.getUint8(start + 2),
+        this.view.getUint8(start + 3),
+      );
+    }
     let result = '';
     for (let i = 0; i < length; i++) {
       result += String.fromCharCode(this.view.getUint8(start + i));

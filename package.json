@@ -2,7 +2,7 @@
   "name": "web-ffmpeg-gpu-root",
   "version": "0.1.0",
   "private": true,
-  "description": "Next-Gen Web-FFmpeg Monorepo: Rust Core, WebCodecs ASIC Hardware Acceleration, WebGPU Realtime Shaders, WebRTC Multi-Peer Mesh, and DeepSeek Harness (dsh) AI Media Autopilot",
+  "description": "Next-Gen Web-FFmpeg Monorepo with WebGPU Shader Pipelines & WebCodecs Hardware Acceleration",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -14,11 +14,16 @@
     "build:agent": "npm run build --workspace=packages/agent",
     "build:mcp": "npm run build --workspace=packages/mcp-server",
     "build:playground": "npm run build --workspace=apps/playground",
-    "build:wasm": "cargo build --workspace --target wasm32-unknown-unknown --release",
-    "check:rust": "cargo check --workspace --target wasm32-unknown-unknown",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "check:rust": "cargo check -p web-ffmpeg-core --target wasm32-unknown-unknown",
     "build": "npm run build:core && npm run build:mcp && npm run build:agent && npm run build:playground",
     "mcp": "node packages/mcp-server/dist/index.js",
     "test:e2e": "playwright test",
+    "bench:ffmpeg": "node scripts/bench-vs-ffmpeg.mjs",
+    "bench:demux": "node --experimental-strip-types scripts/bench-demux-vs-ffmpeg.ts",
+    "bench:wasm": "node scripts/sync-ffmpeg-wasm.mjs && playwright test tests/benchmark/ffmpeg-wasm-vs-webcodecs.spec.ts",
+    "bench:layers": "node scripts/sync-ffmpeg-wasm.mjs && playwright test tests/benchmark/layer-matrix.spec.ts",
+    "bench:vs-ffmpeg": "node scripts/bench-vs-ffmpeg.mjs && playwright test tests/benchmark/ffmpeg-vs-gpu.spec.ts",
     "preview": "npm run preview --workspace=apps/playground"
   },
   "keywords": [
@@ -33,9 +38,11 @@
   "author": "Web-FFmpeg-GPU Contributors",
   "license": "MIT",
   "devDependencies": {
+    "@ffmpeg/core": "^0.12.10",
     "@playwright/test": "^1.50.0",
     "@types/node": "^26.5.0",
     "@webgpu/types": "^0.1.72",
+    "ffmpeg-static": "^5.3.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   }

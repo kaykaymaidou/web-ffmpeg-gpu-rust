@@ -15,7 +15,7 @@ const FILTER_MODE_MAP: Record<FilterMode, number> = {
 };
 
 export class WebGpuVideoRenderer {
-  private canvas: HTMLCanvasElement;
+  private canvas: HTMLCanvasElement | OffscreenCanvas;
   private adapter: GPUAdapter | null = null;
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
@@ -26,7 +26,7 @@ export class WebGpuVideoRenderer {
   private deviceName: string = 'Unknown WebGPU Device';
   private computeEngine: WebGpuComputeEngine | null = null;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     this.canvas = canvas;
   }
 
@@ -52,14 +52,7 @@ export class WebGpuVideoRenderer {
     }
 
     this.device = await this.adapter.requestDevice();
-    this.context = this.canvas.getContext('webgpu') as GPUCanvasContext;
-
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    this.context.configure({
-      device: this.device,
-      format: presentationFormat,
-      alphaMode: 'opaque',
-    });
+    this.configureContext();
 
     // Create 16-byte aligned uniform buffer
     this.uniformBuffer = this.device.createBuffer({
@@ -110,6 +103,7 @@ export class WebGpuVideoRenderer {
       bindGroupLayouts: [this.bindGroupLayout],
     });
 
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
     this.pipeline = this.device.createRenderPipeline({
       layout: pipelineLayout,
       vertex: {
@@ -132,6 +126,44 @@ export class WebGpuVideoRenderer {
 
   public getComputeEngine(): WebGpuComputeEngine | null {
     return this.computeEngine;
+  }
+
+  private configureContext(): void {
+    if (!this.device) {
+      return;
+    }
+    this.context = this.canvas.getContext('webgpu') as GPUCanvasContext | null;
+    if (!this.context) {
+      throw new Error('Failed to acquire WebGPU canvas context');
+    }
+    this.context.configure({
+      device: this.device,
+      format: navigator.gpu.getPreferredCanvasFormat(),
+      alphaMode: 'opaque',
+    });
+  }
+
+  public ensureSize(width: number, height: number): void {
+    if (this.canvas.width === width && this.canvas.height === height) {
+      return;
+    }
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.configureContext();
+  }
+
+  /**
+   * Render `source` through the WGSL filter pipeline and return a new VideoFrame.
+   * Caller owns the returned frame and MUST close it.
+   */
+  public renderToVideoFrame(source: VideoFrame): VideoFrame {
+    this.ensureSize(source.displayWidth || source.codedWidth, source.displayHeight || source.codedHeight);
+    this.render(source);
+    return new VideoFrame(this.canvas, {
+      timestamp: source.timestamp,
+      duration: source.duration ?? undefined,
+      alpha: 'discard',
+    });
   }
 
   /**

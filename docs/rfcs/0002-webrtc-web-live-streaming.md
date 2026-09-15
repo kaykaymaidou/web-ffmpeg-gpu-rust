@@ -1,7 +1,8 @@
 # RFC 0002: 低延迟 Web 直播与 WebRTC 引擎架构 (Live Ingest & Egress Engine)
 
-- **状态**: Draft (深度调研与方案对齐)
+- **状态**: Accepted (P2P / Mesh / 混流 / Agent 已落地；WHIP/WHEP 见 RFC 0003)
 - **提出时间**: 2026-09-08
+- **后续切片**: [RFC 0003: 标准 WHIP / WHEP 广播推拉流客户端](./0003-whip-whep-broadcast-clients.md)
 - **参考研究**: [Web 直播与 RTC 实战深度调研报告](file:///d:/Project/web-ffmpeg-gpu/docs/research/live-streaming-industry-analysis.md)
 - **责任模块**: `crates/core` (Rust FLV/fMP4/MoQ Demuxer & JitterBuffer), `packages/core` (LiveStreamer & LivePlayer), `apps/playground` (实时流媒体演示台)
 

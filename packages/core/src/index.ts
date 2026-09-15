@@ -23,6 +23,8 @@ export {
   type MultiCompositorOptions,
 } from './renderer/multi-compositor';
 export { SimpleMp4Demuxer, type DemuxedTrack, type DemuxedSample } from './demuxer/mp4-demuxer';
+export { grayscaleRgbaInPlace } from './filter/cpu-grayscale';
+export { loadRustCore, getRustEngineVersion, type RustCoreModule } from './wasm/rust-core';
 export { StreamFeeder, type StreamPacket } from './stream/feeder';
 export { FILTERS_WGSL } from './shaders/filters.wgsl';
 export { COMPOSITOR_WGSL } from './shaders/compositor.wgsl';

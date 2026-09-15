@@ -38,9 +38,10 @@
 - [x] **音频绝对主时钟与动态平滑追帧 (Audio Master Clock Engine)**：
   - 以 `AudioContext.currentTime` + `outputLatency` 为硬件基准主时钟；
   - 1.05x 平滑声画微调对齐，消除长期直播口型漂移（Lip-sync Drift），零破音。
-- [x] **纯 Rust 实时流解复用器 (Live Demuxers)**：
-  - HTTP-FLV / WebSocket-FLV 纯 Rust 实时流解析，彻底替代容易 OOM 的 MSE；
-  - 导出 `RustFlvDemuxer` 与流式 Tag / Packet 提取。
+- [x] **标准 WHIP / WHEP 广播推拉流客户端 (RFC 0003)**：
+  - HTTP POST SDP Offer/Answer、PATCH ICE Trickle、DELETE 优雅下线；
+  - 标准 RTP Track 对接 SRS / Janus / MediaSoup / LiveKit / Cloudflare Stream；
+  - Playground Loopback 网关与 Playwright 协议/连通性验收。
 
 ---
 

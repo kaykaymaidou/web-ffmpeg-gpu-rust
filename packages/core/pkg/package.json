@@ -1,0 +1,19 @@
+{
+  "name": "web-ffmpeg-core",
+  "type": "module",
+  "collaborators": [
+    "Web-FFmpeg-GPU Contributors"
+  ],
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "web_ffmpeg_core_bg.wasm",
+    "web_ffmpeg_core.js",
+    "web_ffmpeg_core.d.ts"
+  ],
+  "main": "web_ffmpeg_core.js",
+  "types": "web_ffmpeg_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

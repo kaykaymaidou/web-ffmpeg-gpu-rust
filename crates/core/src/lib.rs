@@ -9,11 +9,16 @@ pub mod packet;
 pub mod timeline;
 
 pub use bitstream::{
-    annex_b_to_avcc, avcc_to_annex_b, build_avcc, build_hvcc, parse_hevc_sps, parse_sps,
-    split_annex_b, split_hevc_annex_b, HevcNalUnit, HevcNalUnitType, HevcSpsInfo, NalUnit,
-    NalUnitType, SpsInfo,
+    annex_b_to_avcc, avcc_to_annex_b, build_adts_header, build_audio_specific_config,
+    build_av1c_config, build_avcc, build_hvcc, decode_leb128, parse_adts_header,
+    parse_audio_specific_config, parse_av1_sequence_header, parse_hevc_sps, parse_obus, parse_sps,
+    split_annex_b, split_hevc_annex_b, AdtsHeader, Av1SequenceHeader, HevcNalUnit,
+    HevcNalUnitType, HevcSpsInfo, NalUnit, NalUnitType, ObuType, ObuUnit, SpsInfo,
 };
-pub use demuxer::{Mp4Demuxer, RustDemuxedSample, RustDemuxedTrack};
+pub use demuxer::{
+    Mp4Demuxer, RustDemuxedSample, RustDemuxedTrack, TsDemuxedSample, TsDemuxer,
+    TsElementaryStream, TsStreamKind,
+};
 pub use engine::{create_rust_packet, create_rust_timeline, RustDemuxer, RustStreamAnalyzer, RustWasmMp4Muxer};
 pub use filter::RustCpuFilter;
 pub use frame::{ColorSpace, FrameMetadata, PixelFormat};

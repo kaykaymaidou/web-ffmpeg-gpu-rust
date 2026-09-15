@@ -99,6 +99,8 @@ impl<'a> Mp4Demuxer<'a> {
         let mut chunk_offsets = Vec::new();
         let mut keyframe_indices = HashSet::new();
         let mut sample_deltas = Vec::new();
+        let mut stsc_entries: Vec<(u32, u32)> = Vec::new();
+        let mut ctts_offsets: Vec<i32> = Vec::new();
 
         while offset + 8 <= end && offset + 8 <= self.data.len() {
             let size = self.read_u32(offset) as usize;
@@ -142,6 +144,8 @@ impl<'a> Mp4Demuxer<'a> {
                                     &mut chunk_offsets,
                                     &mut keyframe_indices,
                                     &mut sample_deltas,
+                                    &mut stsc_entries,
+                                    &mut ctts_offsets,
                                 );
                             }
                             minf_offset += inf_size;
@@ -160,25 +164,57 @@ impl<'a> Mp4Demuxer<'a> {
             return None;
         }
 
+        let samples_per_chunk_at = |chunk_index_1based: usize| -> usize {
+            if stsc_entries.is_empty() {
+                if chunk_offsets.len() <= 1 {
+                    return sample_sizes.len();
+                }
+                return 1;
+            }
+            let mut spc = stsc_entries[0].1 as usize;
+            for &(first_chunk, samples_per_chunk) in &stsc_entries {
+                if first_chunk as usize <= chunk_index_1based {
+                    spc = samples_per_chunk as usize;
+                }
+            }
+            spc
+        };
+
         let mut samples = Vec::with_capacity(sample_sizes.len());
-        let mut current_offset = chunk_offsets[0];
-        let mut current_ts_us: i64 = 0;
+        let mut sample_index = 0usize;
+        let mut decode_ticks: i64 = 0;
 
-        for (i, &size) in sample_sizes.iter().enumerate() {
-            let delta = sample_deltas.get(i).copied().unwrap_or(1000);
-            let duration_us = ((delta as f64 / timescale as f64) * 1_000_000.0).round() as u64;
-            let is_key = keyframe_indices.is_empty() || keyframe_indices.contains(&i);
+        for (chunk, &chunk_start) in chunk_offsets.iter().enumerate() {
+            if sample_index >= sample_sizes.len() {
+                break;
+            }
+            let mut byte_offset = chunk_start;
+            let count = samples_per_chunk_at(chunk + 1);
+            for _ in 0..count {
+                if sample_index >= sample_sizes.len() {
+                    break;
+                }
+                let size = sample_sizes[sample_index];
+                let delta = sample_deltas.get(sample_index).copied().unwrap_or(1000);
+                let composition = i64::from(ctts_offsets.get(sample_index).copied().unwrap_or(0));
+                let duration_us = ((delta as f64 / timescale as f64) * 1_000_000.0).round() as u64;
+                let pts_ticks = decode_ticks + composition;
+                let timestamp_us =
+                    ((pts_ticks as f64 / timescale as f64) * 1_000_000.0).round() as i64;
+                let is_key = keyframe_indices.is_empty() || keyframe_indices.contains(&sample_index);
 
-            samples.push(RustDemuxedSample {
-                is_key,
-                timestamp_us: current_ts_us,
-                duration_us,
-                offset: current_offset,
-                size,
-            });
+                samples.push(RustDemuxedSample {
+                    is_key,
+                    timestamp_us: timestamp_us.max(0),
+                    duration_us,
+                    offset: byte_offset,
+                    size,
+                });
 
-            current_ts_us += duration_us as i64;
-            current_offset += size;
+                byte_offset += size;
+                decode_ticks += i64::from(delta);
+                sample_index += 1;
+            }
         }
 
         Some(RustDemuxedTrack {
@@ -204,6 +240,8 @@ impl<'a> Mp4Demuxer<'a> {
         chunk_offsets: &mut Vec<usize>,
         keyframe_indices: &mut HashSet<usize>,
         sample_deltas: &mut Vec<u32>,
+        stsc_entries: &mut Vec<(u32, u32)>,
+        ctts_offsets: &mut Vec<i32>,
     ) {
         let mut offset = start;
 
@@ -315,6 +353,28 @@ impl<'a> Mp4Demuxer<'a> {
                         }
                     }
                 }
+                "stsc" if offset + 16 <= self.data.len() => {
+                    let count = self.read_u32(offset + 12) as usize;
+                    for i in 0..count {
+                        let pos = offset + 16 + i * 12;
+                        if pos + 12 <= self.data.len() {
+                            stsc_entries.push((self.read_u32(pos), self.read_u32(pos + 4)));
+                        }
+                    }
+                }
+                "ctts" if offset + 16 <= self.data.len() => {
+                    let count = self.read_u32(offset + 12) as usize;
+                    for i in 0..count {
+                        let pos = offset + 16 + i * 8;
+                        if pos + 8 <= self.data.len() {
+                            let sample_count = self.read_u32(pos) as usize;
+                            let composition = self.read_i32(pos + 4);
+                            for _ in 0..sample_count {
+                                ctts_offsets.push(composition);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
 
@@ -324,6 +384,15 @@ impl<'a> Mp4Demuxer<'a> {
 
     fn read_u16(&self, offset: usize) -> u16 {
         u16::from_be_bytes([self.data[offset], self.data[offset + 1]])
+    }
+
+    fn read_i32(&self, offset: usize) -> i32 {
+        i32::from_be_bytes([
+            self.data[offset],
+            self.data[offset + 1],
+            self.data[offset + 2],
+            self.data[offset + 3],
+        ])
     }
 
     fn read_u32(&self, offset: usize) -> u32 {

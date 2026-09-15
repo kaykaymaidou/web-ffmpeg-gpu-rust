@@ -6,6 +6,7 @@ export interface VideoEncoderOptions {
   framerate?: number;
   latencyMode?: 'quality' | 'realtime';
   bitrateMode?: 'constant' | 'variable';
+  avcFormat?: 'avc' | 'annexb';
 }
 
 export type ChunkCallback = (
@@ -54,7 +55,7 @@ export class HardwareVideoEncoder {
       latencyMode: options.latencyMode || 'quality',
       bitrateMode: options.bitrateMode || 'variable',
       hardwareAcceleration: 'prefer-hardware',
-      avc: { format: 'avc' },
+      avc: { format: options.avcFormat || 'avc' },
     };
 
     const isSupported = await HardwareVideoEncoder.isSupported(config);
