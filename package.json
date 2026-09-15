@@ -20,6 +20,7 @@
     "build": "npm run build:core && npm run build:mcp && npm run build:agent && npm run build:playground",
     "mcp": "node packages/mcp-server/dist/index.js",
     "test:e2e": "playwright test",
+    "fetch:fixtures": "node scripts/fetch-real-fixtures.mjs",
     "bench:ffmpeg": "node scripts/bench-vs-ffmpeg.mjs",
     "bench:demux": "node --experimental-strip-types scripts/bench-demux-vs-ffmpeg.ts",
     "bench:wasm": "node scripts/sync-ffmpeg-wasm.mjs && playwright test tests/benchmark/ffmpeg-wasm-vs-webcodecs.spec.ts",
