@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 web-ffmpeg-core = { path = "../core" }
+symphonia = { version = "0.5", default-features = false, features = ["isomp4", "aac", "pcm"] }
 
 [features]
 default = []
+

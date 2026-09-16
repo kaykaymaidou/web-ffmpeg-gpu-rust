@@ -16,9 +16,9 @@ export class WindowsTranscodeDaemon {
   constructor(private config: ServiceConfig) {}
 
   async start(): Promise<void> {
-    console.log('🏁 [WindowsService] Starting Web-FFmpeg Background Transcode Daemon...');
+    console.log('[INFO] [daemon] Starting background transcode daemon...');
     const rustCore = await loadRustCore();
-    console.log(`⚡ [WindowsService] Rust Engine linked: ${rustCore.get_engine_version()}`);
+    console.log(`[INFO] [daemon] Rust core linked: ${rustCore.get_engine_version()}`);
 
     if (!fs.existsSync(this.config.watchDir)) {
       fs.mkdirSync(this.config.watchDir, { recursive: true });
@@ -29,11 +29,11 @@ export class WindowsTranscodeDaemon {
 
     this.isRunning = true;
     this.scheduleNextPoll();
-    console.log(`👀 [WindowsService] Watching directory: ${path.resolve(this.config.watchDir)}`);
+    console.log(`[INFO] [daemon] Watching directory: ${path.resolve(this.config.watchDir)}`);
   }
 
   stop(): void {
-    console.log('🛑 [WindowsService] Stopping Transcode Daemon gracefully...');
+    console.log('[INFO] [daemon] Stopping transcode daemon...');
     this.isRunning = false;
     if (this.timer) {
       clearTimeout(this.timer);
@@ -47,7 +47,7 @@ export class WindowsTranscodeDaemon {
       try {
         await this.pollOnce();
       } catch (err) {
-        console.error('❌ [WindowsService] Poll iteration error:', err);
+        console.error('[ERROR] [daemon] Poll error:', err);
       }
       this.scheduleNextPoll();
     }, this.config.pollIntervalMs);
@@ -65,7 +65,7 @@ export class WindowsTranscodeDaemon {
       const stat = fs.statSync(fullPath);
       if (stat.isFile() && stat.size > 0) {
         this.processingSet.add(fullPath);
-        console.log(`📥 [WindowsService] Discovered incoming media: ${file} (${(stat.size / 1024).toFixed(1)} KB)`);
+        console.log(`[INFO] [daemon] Discovered incoming media: ${file} (${(stat.size / 1024).toFixed(1)} KB)`);
         // Dispatch processing
         this.processFile(fullPath, file);
       }
@@ -79,14 +79,14 @@ export class WindowsTranscodeDaemon {
 
       // Quick probe using Rust demuxer
       const demuxer = new mod.RustDemuxer(buffer);
-      console.log(`🔍 [WindowsService] Probed ${fileName}: tracks=${demuxer.track_count()}, codec=${demuxer.video_codec()}`);
+      console.log(`[INFO] [daemon] Probed ${fileName}: tracks=${demuxer.track_count()}, codec=${demuxer.video_codec()}`);
 
       // In real daemon: transcode or repackage into outputDir
       const destPath = path.join(this.config.outputDir, `${path.parse(fileName).name}_processed.mp4`);
       fs.writeFileSync(destPath, buffer);
-      console.log(`✅ [WindowsService] Successfully processed to: ${destPath}`);
+      console.log(`[INFO] [daemon] Processed: ${destPath}`);
     } catch (err) {
-      console.error(`❌ [WindowsService] Error processing ${fileName}:`, err);
+      console.error(`[ERROR] [daemon] Error processing ${fileName}:`, err);
     } finally {
       this.processingSet.delete(filePath);
     }

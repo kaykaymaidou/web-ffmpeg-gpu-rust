@@ -23,7 +23,7 @@ function scanDir(dir, ext, fileList = []) {
   return fileList;
 }
 
-console.log('🛡️ [Boundary Check] Verifying Monorepo Architecture Invariants...');
+console.log('[INFO] [check-boundaries] Verifying monorepo architecture invariants...');
 
 // 1. Check crates/core Rust Boundary
 const coreSrcDir = path.resolve('crates/core/src');
@@ -42,8 +42,8 @@ for (const file of rustFiles) {
 
     for (const { pattern, reason } of FORBIDDEN_RUST_CORE_PATTERNS) {
       if (pattern.test(line)) {
-        console.error(`❌ [Violation in ${relPath}:${idx + 1}]: ${reason}`);
-        console.error(`   > ${trimmed}`);
+        console.error(`[FAIL] [check-boundaries] Violation in ${relPath}:${idx + 1}: ${reason}`);
+        console.error(`       > ${trimmed}`);
         coreViolations++;
       }
     }
@@ -58,18 +58,18 @@ let gitignoreViolations = 0;
 
 for (const rule of REQUIRED_IGNORES) {
   if (!gitignoreContent.includes(rule)) {
-    console.error(`❌ [.gitignore Violation]: Missing required ignore pattern '${rule}'`);
+    console.error(`[FAIL] [check-boundaries] Missing required ignore pattern in .gitignore: '${rule}'`);
     gitignoreViolations++;
   }
 }
 
 // Summary
 if (coreViolations === 0 && gitignoreViolations === 0) {
-  console.log(`✅ [Boundary Check] All ${rustFiles.length} Rust core files strictly respect Zero-OS-I/O!`);
-  console.log(`✅ [Boundary Check] Master .gitignore verified with all required cleanliness rules.`);
-  console.log('🛡️ Monorepo Architecture Invariants: 100% COMPLIANT.');
+  console.log(`[PASS] [check-boundaries] All ${rustFiles.length} Rust core files conform to Zero-OS-I/O.`);
+  console.log(`[PASS] [check-boundaries] .gitignore hygiene verified.`);
+  console.log('[OK] Architecture invariants: 100% compliant.');
   process.exit(0);
 } else {
-  console.error(`💥 Boundary Check failed with ${coreViolations + gitignoreViolations} violations.`);
+  console.error(`[ERROR] [check-boundaries] Failed with ${coreViolations + gitignoreViolations} violation(s).`);
   process.exit(1);
 }

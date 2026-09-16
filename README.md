@@ -1,8 +1,8 @@
-# Web-FFmpeg-GPU 🚀
+# Web-FFmpeg-GPU
 
 **English** | [简体中文](README.zh-CN.md)
 
-Next-Gen Web Media Processing Engine powered by **Rust + WebCodecs + WebGPU** — Re-architecting **FFmpeg's** classic streaming pipeline with modern **Rust** memory safety, direct access to GPU hardware video decoders/encoders (NVDEC/NVENC, Intel QuickSync, Apple VideoToolbox), and WebGPU WGSL realtime shader pipelines.
+High-performance streaming media engine built on **Rust + WebCodecs + WebGPU**. Re-architects FFmpeg's classic pipeline with memory-safe zero-copy dataflow, directly utilizing hardware video decoders and encoders (NVDEC/NVENC, Intel QuickSync, Apple VideoToolbox) and WebGPU WGSL compute shaders.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Engine: Rust + WebGPU + WebCodecs](https://img.shields.io/badge/Engine-Rust%20%2B%20WebGPU%20%2B%20WebCodecs-orange.svg)](#)
@@ -14,109 +14,104 @@ Next-Gen Web Media Processing Engine powered by **Rust + WebCodecs + WebGPU** �
 
 ---
 
-### 🔍 Search Keywords & Topics Index
+### Search Keywords & Topics Index
 
 > **Topics & Index**: `ffmpeg-alternative`, `web-ffmpeg`, `wff`, `webcodecs-hardware-acceleration`, `webgpu-video-filters`, `wgsl-compute-shaders`, `pure-rust-demuxer`, `lossless-cut`, `fast-video-trim`, `capcut-web-architecture`, `multitrack-timeline`, `webrtc-whip-whep`, `zero-copy-video`, `ai-video-editing`, `faststart-mp4`, `av1-hevc-h264`, `desktop-c-abi-sdk`.
 
 ---
 
-## 💡 Strategic Architecture: Discard 30-Year Obsolete Baggage, Master the Modern Video Frontier
+## Design Rationale: Modern Media Subset Focus
 
-Many engineers wonder: *"FFmpeg took 25 years to build; how can a modern project rewrite or surpass it?"*  
-**The secret lies in the fact that we do NOT need to rewrite the 1.2 million lines of legacy C code created to support antique 1995 formats!**
+FFmpeg contains over a million lines of legacy C code to maintain compatibility with decades of obsolete media formats (RealMedia, Cinepak, Indeo, MPEG-1/2, DV tapes, and historic pixel formats). These formats account for 0% of modern web, streaming, and AI workloads, yet contribute to vulnerability attack surfaces and binary bloat.
 
-* **The 80% Obsolete Baggage We Deliberately Discard**:
-  RealMedia (`.rmvb`), Cinepak, Indeo, Sega Saturn audio, MPEG-1/2 VCD, DV tapes, and hundreds of obsolete pixel formats (YUV410, RGB555). These formats represent **0.00%** of modern short video, streaming, AI media, and smartphone cameras, yet they contribute 80% of FFmpeg's bloat, CVE buffer overflow vulnerabilities, and maintenance paralysis.
-* **The 99.99% Modern Video Frontier We 100% Master**:
-  1. **Container Standards**: MP4 (ISOBMFF / fMP4) + WebM / MKV + Enhanced FLV + MPEG-TS
-  2. **Video Codecs**: H.264 (AVC) + H.265 (HEVC 4K/HDR) + AV1 (Next-Gen Royalty-Free)
-  3. **Audio Codecs**: AAC (Universal Media) + Opus (Ultra-Low Latency / WebRTC)
-  4. **Acceleration Silicon**: **WebCodecs** (Direct GPU ASIC access: NVDEC/NVENC/QuickSync/Apple Silicon) + **WebGPU** (WGSL zero-copy compute shaders) + **Desktop C-ABI** (`web_ffmpeg_native.dll`)
+Web-FFmpeg-GPU focuses exclusively on the modern media subset:
 
-**Key Architectural Payoffs**:
-- **Radical Slimming**: Core WASM drops from 30MB to **169KB** (Gzip **65KB**), booting instantaneously.
-- **100% Hardware Silicon Accelerated**: Bypasses CPU software bottlenecks; achieves **2,176 FPS** decoding throughput with < 5% CPU load.
-- **Zero-Copy In-VRAM GPU Pipeline**: Video frames bind directly as WebGPU textures; watermarks, 3D LUTs, bilateral denoise, and gaussian blurs compute in **0.18ms ~ 0.42ms**.
-- **Native Timeline Ergonomics**: Engineered from the ground up for declarative multi-track editing (CapCut / Remotion paradigm) and AI autopilot workflows.
+- **Containers**: MP4 (ISOBMFF / fMP4), WebM / MKV, Enhanced FLV, MPEG-TS
+- **Video Codecs**: H.264 (AVC), H.265 (HEVC), AV1
+- **Audio Codecs**: AAC, Opus
+- **Hardware Acceleration**: **WebCodecs** (direct GPU ASIC access: NVDEC/NVENC/QuickSync/Apple Silicon), **WebGPU** (WGSL zero-copy compute shaders), and **Desktop C-ABI** (`web_ffmpeg_native.dll`)
+
+### Core Architectural Benefits
+- **Minimal Footprint**: Core Rust WASM package is **~169KB** (Gzip **~65KB**), an over 99% reduction compared to traditional 30MB+ `ffmpeg.wasm`.
+- **Hardware Direct Path**: Utilizes dedicated GPU hardware decoders, achieving **2,176 FPS** 1080p decoding throughput with < 5% CPU utilization.
+- **In-VRAM Zero-Copy Pipeline**: Video frames import directly into WebGPU textures without CPU-GPU host copies. Watermarking (0.18ms/frame) and bilateral denoise (0.42ms/frame) run entirely within GPU VRAM.
+- **Declarative Timeline Engine**: Engineered for structured timeline graphs (Timeline JSON), integrating cleanly with web video editing interfaces and automated AI workflows.
 
 ---
 
-## 📌 Fundamental Capability Parity Matrix vs Standard FFmpeg
+## Capability Parity Matrix vs Standard FFmpeg
 
-All essential everyday media capabilities of traditional FFmpeg (demuxing, bitstream parsing, hardware decoding/encoding, audio resampling & channel mixing, filtergraph scheduling, container muxing, and realtime WebRTC live streaming) have been natively reproduced and modernized in pure Rust and Web standards:
+Standard media pipeline operations are implemented natively in pure Rust and modern Web standards:
 
 | Capability Dimension | Standard FFmpeg Module | Web-FFmpeg-GPU Implementation | Parity Status |
 | :--- | :--- | :--- | :--- |
-| **MP4 / fMP4 Demuxing** | `libavformat/mov.c` | `crates/core/src/demuxer/mp4.rs` (Pure Rust recursive Box tree, sub-millisecond track/sample extraction) | ✅ **100% Pure Rust Parity** |
-| **MPEG-TS Demuxing** | `libavformat/mpegts.c` | `crates/core/src/demuxer/ts.rs` (188-byte sync recovery, PAT/PMT, PES reassembly, 33-bit 90kHz PTS/DTS) | ✅ **100% Pure Rust Parity** |
-| **WebM / MKV Demuxing** | `libavformat/matroskadec.c` | `crates/core/src/demuxer/mkv.rs` (RFC 8794 EBML VINT, Track/Cluster/SimpleBlock microsecond PTS) | ✅ **100% Pure Rust Parity** |
-| **FLV / Enhanced FLV** | `libavformat/flvdec.c` | `crates/core/src/live/flv_demuxer.rs` (H.264, HEVC, AAC, Opus tag parsing & streaming packetization) | ✅ **100% Pure Rust Parity** |
-| **H.264 Bitstream & Extradata** | `libavcodec/h264_parser.c` | `crates/core/src/bitstream/h264.rs` (Annex B splitter, Exp-Golomb SPS parsing, `avcC` extradata generator) | ✅ **100% Pure Rust Parity** |
-| **H.265/HEVC Bitstream & Extradata** | `libavcodec/hevc_parser.c` | `crates/core/src/bitstream/h265.rs` (HEVC NAL splitter, VPS/SPS/PPS parsing, `hvcC` extradata builder) | ✅ **100% Pure Rust Parity** |
-| **AV1 OBU Bitstream & Extradata** | `libavcodec/av1_parser.c` | `crates/core/src/bitstream/av1.rs` (OBU parser, LEB128 decoding, `av1C` config box builder) | ✅ **100% Pure Rust Parity** |
-| **AAC Bitstream & Header** | `libavcodec/aac_parser.c` | `crates/core/src/bitstream/aac.rs` (ADTS 7-byte header parser/packer, `AudioSpecificConfig` generator) | ✅ **100% Pure Rust Parity** |
-| **Audio Resampling** | `libswresample/resample.c` | `crates/core/src/audio/resampler.rs` (Fractional phase linear resampler: 48k↔44.1k, 48k→16k speech extraction) | ✅ **100% Pure Rust Parity** |
-| **Audio Channel Matrix Mixing** | `libswresample/rematrix.c` | `crates/core/src/audio/mixer.rs` (ITU-R BS.775 power-normalized 5.1-to-Stereo downmix, soft limiter) | ✅ **100% Pure Rust Parity** |
-| **Filtergraph Parser & Planner** | `libavfilter/graphparser.c` | `crates/core/src/filter/graph.rs` (FFmpeg `-vf` string lexer/parser, WebGPU/CPU capability negotiator) | ✅ **100% Pure Rust Parity** |
-| **Hardware Shader Filters** | `libavfilter/vf_*.c` | `packages/core/src/renderer/gpu-compute-pipeline.ts` (Lanczos upsampling, Bilateral denoise, 256-bin histogram) | 🚀 **WebGPU Accelerated** |
-| **FastStart MP4 Muxing** | `libavformat/movenc.c` | `crates/core/src/muxer/mp4.rs` (Pure Rust FastStart muxer, places `moov` at front for instant web streaming) | ✅ **100% Pure Rust Parity** |
-| **Realtime RTP / WebRTC** | `libavformat/rtp*.c` | `crates/core/src/live/rtp.rs` (FU-A fragmentation, STAP-A aggregation, 16-bit unrolling, RFC 3550 Jitter Buffer) | 🚀 **Native WebRTC Parity** |
-| **Streaming Broadcast Clients** | `libavformat/http.c` | `packages/core/src/live/whip-client.ts` / `whep-client.ts` (Standard RFC 0003 WHIP/WHEP clients) | 🚀 **Standards-Compliant** |
+| **MP4 / fMP4 Demuxing** | `libavformat/mov.c` | `crates/core/src/demuxer/mp4.rs` (Recursive Box tree, sub-millisecond track/sample extraction) | Pure Rust Parity |
+| **MPEG-TS Demuxing** | `libavformat/mpegts.c` | `crates/core/src/demuxer/ts.rs` (188-byte sync recovery, PAT/PMT, PES reassembly, 33-bit 90kHz PTS/DTS) | Pure Rust Parity |
+| **WebM / MKV Demuxing** | `libavformat/matroskadec.c` | `crates/core/src/demuxer/mkv.rs` (RFC 8794 EBML VINT, Track/Cluster/SimpleBlock microsecond PTS) | Pure Rust Parity |
+| **FLV / Enhanced FLV** | `libavformat/flvdec.c` | `crates/core/src/live/flv_demuxer.rs` (H.264, HEVC, AAC, Opus tag parsing & streaming packetization) | Pure Rust Parity |
+| **H.264 Bitstream & Extradata** | `libavcodec/h264_parser.c` | `crates/core/src/bitstream/h264.rs` (Annex B splitter, Exp-Golomb SPS parsing, `avcC` extradata generator) | Pure Rust Parity |
+| **H.265/HEVC Bitstream & Extradata** | `libavcodec/hevc_parser.c` | `crates/core/src/bitstream/hevc.rs` (HEVC NAL splitter, VPS/SPS/PPS parsing, `hvcC` extradata builder) | Pure Rust Parity |
+| **AV1 OBU Bitstream & Extradata** | `libavcodec/av1_parser.c` | `crates/core/src/bitstream/av1.rs` (OBU parser, LEB128 decoding, `av1C` config box builder) | Pure Rust Parity |
+| **AAC Bitstream & Header** | `libavcodec/aac_parser.c` | `crates/core/src/bitstream/aac.rs` (ADTS 7-byte header parser/packer, `AudioSpecificConfig` generator) | Pure Rust Parity |
+| **Audio Resampling** | `libswresample/resample.c` | `crates/core/src/audio/resampler.rs` (Fractional phase linear resampler: 48k↔44.1k, 48k→16k speech extraction) | Pure Rust Parity |
+| **Audio Channel Matrix Mixing** | `libswresample/rematrix.c` | `crates/core/src/audio/mixer.rs` (ITU-R BS.775 power-normalized 5.1-to-Stereo downmix, soft limiter) | Pure Rust Parity |
+| **Filtergraph Parser & Planner** | `libavfilter/graphparser.c` | `crates/core/src/filter/graph.rs` (FFmpeg `-vf` string lexer/parser, WebGPU/CPU capability negotiator) | Pure Rust Parity |
+| **Hardware Shader Filters** | `libavfilter/vf_*.c` | `packages/core/src/renderer/gpu-compute-pipeline.ts` (Lanczos upsampling, Bilateral denoise, 256-bin histogram) | WebGPU Accelerated |
+| **FastStart MP4 Muxing** | `libavformat/movenc.c` | `crates/core/src/muxer/mp4.rs` (Pure Rust FastStart muxer, places `moov` at front for streaming) | Pure Rust Parity |
+| **Realtime RTP / WebRTC** | `libavformat/rtp*.c` | `crates/core/src/live/rtp.rs` (FU-A fragmentation, STAP-A aggregation, 16-bit unrolling, RFC 3550 Jitter Buffer) | Native WebRTC Parity |
+| **Streaming Broadcast Clients** | `libavformat/http.c` | `packages/core/src/live/whip-client.ts` / `whep-client.ts` (Standard RFC 0003 WHIP/WHEP clients) | Standards-Compliant |
 
 ---
 
-## 💻 Instant Universal Productivity Tool: `wff` CLI (Web-FFmpeg CLI)
+## CLI Tool: `wff` (Web-FFmpeg CLI)
 
-Developers often remark: *"FFmpeg's greatest ergonomic superpower is running a one-liner command in the shell. Can you do that?"*  
-**Yes! And it runs faster, lighter, and smarter than native FFmpeg!**
+`apps/cli` provides a unified command-line tool `wff`, executing demuxing, smart trimming, and stream concatenation directly against the pure Rust memory engine and hardware pipeline:
 
-The repository ships with an out-of-the-box universal CLI tool `wff` (`apps/cli`), backed by pure Rust memory engines and hardware pipelines:
-
-### Quick Command Verification:
+### Command Usage:
 
 ```bash
-# 1. Ultra-fast media probe (2.28 ms, 15x faster than ffprobe)
+# 1. Media probe (2.28 ms)
 npm run wff -- probe video.mp4
 
-# 2. Lossless smart keyframe cut (6.02 ms, pure Rust slice, >100x faster than FFmpeg re-encoding)
+# 2. Keyframe-aligned lossless trim (6.02 ms)
 npm run wff -- trim video.mp4 -ss 1.0 -to 3.0 -o clip.mp4
 
-# 3. Seamless multi-video concat (4.83 ms, automatic timestamp alignment, FastStart moov prepended)
+# 3. Stream concatenation (4.83 ms, continuous timestamps, FastStart moov)
 npm run wff -- concat -i clip1.mp4 -i clip2.mp4 -o merged.mp4
 
-# 4. Filtergraph parser & planner (parses -vf, compiles DAG into WebGPU WGSL compute shaders)
+# 4. Filtergraph parser & planner (parses -vf, compiles DAG into WebGPU/CPU targets)
 npm run wff -- filter-plan -i video.mp4 -vf "scale=1280:720,fps=30,grayscale,lut3d=film.cube"
 
-# 5. Watermarks & overlays (WebGPU in-VRAM Alpha blending at 0.18 ms/frame)
+# 5. Watermarks & overlay topology check
 npm run wff -- watermark-plan -i video.mp4 -w logo.png
 
-# 6. AI & energy-based auto-cut (scans audio RMS energy, generates CapCut/Remotion Timeline JSON)
+# 6. Audio energy-based auto-cut planning
 npm run wff -- autocut-plan video.mp4
 ```
 
-> 🎯 **Trimming Comparison vs Standard FFmpeg**:
-> - Standard FFmpeg with `-c copy`: Fast, but restricted to nearest keyframes; **starting non-keyframes causes 1~3 seconds of frozen black/green frames**.
-> - Standard FFmpeg with `-c:v libx264`: Frame accurate, but **full re-encoding takes 30+ seconds and degrades quality**.
-> - **Our `wff trim`**: Pure Rust nanosecond sample indexing; **produces clean MP4 in 6.02 ms with zero black screens, 100% validated by native FFmpeg CLI**!
+> **Trimming Comparison vs Standard FFmpeg**:
+> - Standard FFmpeg `-c copy`: Fast, but restricted to nearest keyframes; non-keyframe cut points cause frozen or corrupt frames at stream start.
+> - Standard FFmpeg with `-c:v libx264`: Frame accurate, but incurs full re-encoding overhead and generation loss.
+> - `wff trim`: Uses pure Rust nanosecond sample indexing; resets the cut point to a valid keyframe and normalizes timeline baselines in 6.02 ms, verified fully standard-compliant by native FFmpeg.
 
 ---
 
-## 🛡️ Real-World Production Scenarios: Architectural Resilience
+## Production Scenarios and Resilience
 
 1. **Video Clipping & Trimming**:
-   - Nanosecond-indexed pure Rust ISOBMFF demuxer enables Smart Cut: micro-reencoding only for edge frames, 100% memory stream copy for intermediate GOPs.
-2. **Auto-Editing & AI Rough Cut**:
-   - Eliminates fragile log parsing with regular expressions; directly analyzes PCM RMS energy to generate structured multi-track Timeline JSON matching CapCut `draft_content.json`.
+   - Nanosecond-indexed pure Rust ISOBMFF demuxer enables smart cutting: selective re-encoding for boundary frames while copying intermediate GOPs without memory overhead.
+2. **Auto-Editing & Audio Energy**:
+   - Computes PCM RMS energy directly in the audio engine, outputting multi-track declarative timeline graphs compatible with CapCut / Remotion project models.
 3. **Composition & Multi-Track Concat**:
-   - `TimelineQueue` provides monotonic PTS sorting and autocorrection for retrograde timestamps (FAIL-03), PTS collisions (FAIL-07), and B-frame pyramids (FAIL-02).
-4. **Heavy Decoding Throughput**:
-   - Direct WebCodecs silicon pipeline tested at **2,176.8 FPS** on real Intel 1,189-frame industrial streams with Zero VRAM Leaks across 1,000 continuous frames.
+   - `TimelineQueue` provides monotonic PTS sorting and normalization for retrograde timestamps (FAIL-03), PTS collisions (FAIL-07), and B-frame reordering (FAIL-02).
+4. **Decoding Throughput**:
+   - Direct WebCodecs hardware pipeline verified at **2,176.8 FPS** on Intel 1,189-frame industrial streams, with zero VRAM leaks confirmed over 1,000 consecutive frames.
 5. **GPU Filters & Watermarks**:
-   - Bypasses CPU pixel loops (`overlay` taking 50ms+); uses WebGPU `importExternalTexture` for in-VRAM alpha blending at **0.18 ms/frame** and bilateral denoise at **0.42 ms/frame**.
+   - Uses WebGPU `importExternalTexture` for in-VRAM alpha blending (0.18 ms/frame) and bilateral denoise (0.42 ms/frame).
 
 ---
 
-## 🏛️ Monorepo Radiating Architecture
+## Monorepo Architecture
 
 The repository is structured with a **Pure Rust Core Engine** at the center, radiating outward to cross-platform SDKs, tools, and application services:
 

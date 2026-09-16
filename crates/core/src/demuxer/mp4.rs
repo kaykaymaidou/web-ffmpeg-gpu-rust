@@ -12,15 +12,107 @@ pub struct RustDemuxedSample {
     pub size: usize,
 }
 
+fn default_track_kind() -> String {
+    "video".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RustDemuxedTrack {
     pub id: u32,
+    #[serde(default = "default_track_kind")]
+    pub kind: String,
     pub codec: String,
     pub width: u32,
     pub height: u32,
+    #[serde(default)]
+    pub channels: Option<u32>,
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
     pub timescale: u32,
     pub description: Option<Vec<u8>>,
     pub samples: Vec<RustDemuxedSample>,
+}
+
+fn read_descr_len(data: &[u8], mut pos: usize) -> (usize, usize) {
+    let mut len = 0usize;
+    let mut count = 0;
+    while pos < data.len() && count < 4 {
+        let b = data[pos];
+        pos += 1;
+        count += 1;
+        len = (len << 7) | ((b & 0x7F) as usize);
+        if (b & 0x80) == 0 {
+            break;
+        }
+    }
+    (len, pos)
+}
+
+fn parse_decoder_config(data: &[u8]) -> Option<Vec<u8>> {
+    if data.is_empty() || data[0] != 0x04 {
+        return None;
+    }
+    let mut pos = 1;
+    let (_len, next_pos) = read_descr_len(data, pos);
+    pos = next_pos;
+    if pos + 13 > data.len() {
+        return None;
+    }
+    pos += 13; // objectTypeIndication(1) + streamType(1) + bufferSizeDB(3) + maxBitrate(4) + avgBitrate(4)
+    if pos >= data.len() || data[pos] != 0x05 {
+        return None;
+    }
+    pos += 1;
+    let (config_len, next_pos) = read_descr_len(data, pos);
+    pos = next_pos;
+    if pos + config_len <= data.len() {
+        Some(data[pos..pos + config_len].to_vec())
+    } else {
+        None
+    }
+}
+
+fn parse_esds_audio_config(data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() < 4 {
+        return None;
+    }
+    let mut pos = 4; // skip 4 bytes version/flags
+    if pos >= data.len() {
+        return None;
+    }
+    if data[pos] == 0x04 {
+        return parse_decoder_config(&data[pos..]);
+    }
+    if data[pos] != 0x03 {
+        return None;
+    }
+    pos += 1;
+    let (_len, next_pos) = read_descr_len(data, pos);
+    pos = next_pos;
+    if pos + 3 > data.len() {
+        return None;
+    }
+    pos += 2; // skip ES_ID
+    let flags = data[pos];
+    pos += 1;
+    if (flags & 0x80) != 0 {
+        pos += 2;
+    }
+    if (flags & 0x40) != 0 {
+        if pos >= data.len() {
+            return None;
+        }
+        let url_len = data[pos] as usize;
+        pos += 1 + url_len;
+    }
+    if (flags & 0x20) != 0 {
+        pos += 2;
+    }
+    if pos < data.len() {
+        parse_decoder_config(&data[pos..])
+    } else {
+        None
+    }
 }
 
 pub struct Mp4Demuxer<'a> {
@@ -90,9 +182,12 @@ impl<'a> Mp4Demuxer<'a> {
     fn parse_trak(&self, start: usize, end: usize) -> Option<RustDemuxedTrack> {
         let mut offset = start;
         let mut track_id = 1;
+        let mut track_kind = "video".to_string();
         let mut codec = "avc1.640028".to_string();
-        let mut width = 1920;
-        let mut height = 1080;
+        let mut width = 0u32;
+        let mut height = 0u32;
+        let mut channels = None;
+        let mut sample_rate = None;
         let mut timescale = 30000;
         let mut description = None;
         let mut sample_sizes = Vec::new();
@@ -117,7 +212,14 @@ impl<'a> Mp4Demuxer<'a> {
                     let m_size = self.read_u32(mdia_offset) as usize;
                     let m_tag = self.read_tag(mdia_offset + 4);
 
-                    if m_tag == "mdhd" && mdia_offset + 28 <= self.data.len() {
+                    if m_tag == "hdlr" && mdia_offset + 20 <= self.data.len() {
+                        let handler_type = self.read_tag(mdia_offset + 16);
+                        if handler_type == "soun" {
+                            track_kind = "audio".to_string();
+                        } else if handler_type == "vide" {
+                            track_kind = "video".to_string();
+                        }
+                    } else if m_tag == "mdhd" && mdia_offset + 28 <= self.data.len() {
                         let version = self.data[mdia_offset + 8];
                         timescale = if version == 1 && mdia_offset + 32 <= self.data.len() {
                             self.read_u32(mdia_offset + 28)
@@ -136,9 +238,12 @@ impl<'a> Mp4Demuxer<'a> {
                                 self.parse_stbl(
                                     minf_offset + 8,
                                     minf_offset + inf_size,
+                                    &mut track_kind,
                                     &mut codec,
                                     &mut width,
                                     &mut height,
+                                    &mut channels,
+                                    &mut sample_rate,
                                     &mut description,
                                     &mut sample_sizes,
                                     &mut chunk_offsets,
@@ -219,9 +324,12 @@ impl<'a> Mp4Demuxer<'a> {
 
         Some(RustDemuxedTrack {
             id: track_id,
+            kind: track_kind,
             codec,
             width,
             height,
+            channels,
+            sample_rate,
             timescale,
             description,
             samples,
@@ -232,9 +340,12 @@ impl<'a> Mp4Demuxer<'a> {
         &self,
         start: usize,
         end: usize,
+        track_kind: &mut String,
         codec: &mut String,
         width: &mut u32,
         height: &mut u32,
+        channels: &mut Option<u32>,
+        sample_rate: &mut Option<u32>,
         description: &mut Option<Vec<u8>>,
         sample_sizes: &mut Vec<usize>,
         chunk_offsets: &mut Vec<usize>,
@@ -266,6 +377,7 @@ impl<'a> Mp4Demuxer<'a> {
                         if (fmt == "avc1" || fmt == "hvc1" || fmt == "vp09" || fmt == "av01")
                             && entry_offset + 36 <= self.data.len()
                         {
+                            *track_kind = "video".to_string();
                             *width = self.read_u16(entry_offset + 32) as u32;
                             *height = self.read_u16(entry_offset + 34) as u32;
 
@@ -292,6 +404,42 @@ impl<'a> Mp4Demuxer<'a> {
                                 }
                                 sub_offset += sub_size;
                             }
+                        } else if fmt == "mp4a" && entry_offset + 36 <= self.data.len() {
+                            *track_kind = "audio".to_string();
+                            *width = 0;
+                            *height = 0;
+                            let ch = self.read_u16(entry_offset + 24) as u32;
+                            *channels = Some(ch);
+                            let sr = self.read_u32(entry_offset + 32) >> 16;
+                            *sample_rate = Some(sr);
+                            *codec = "mp4a.40.2".to_string();
+
+                            // Scan child boxes for esds
+                            let mut sub_offset = entry_offset + 36;
+                            let sub_end = entry_offset + entry_size;
+                            while sub_offset + 8 <= sub_end && sub_offset + 8 <= self.data.len() {
+                                let sub_size = self.read_u32(sub_offset) as usize;
+                                let sub_tag = self.read_tag(sub_offset + 4);
+                                if sub_tag == "esds" && sub_offset + sub_size <= self.data.len() {
+                                    if let Some(asc) = parse_esds_audio_config(&self.data[sub_offset + 8..sub_offset + sub_size]) {
+                                        if asc.len() >= 2 {
+                                            let audio_object_type = (asc[0] >> 3) & 0x1F;
+                                            if audio_object_type > 0 {
+                                                *codec = format!("mp4a.40.{}", audio_object_type);
+                                            }
+                                        }
+                                        *description = Some(asc);
+                                    }
+                                }
+                                sub_offset += sub_size;
+                            }
+                        } else if fmt == "Opus" && entry_offset + 36 <= self.data.len() {
+                            *track_kind = "audio".to_string();
+                            *width = 0;
+                            *height = 0;
+                            *codec = "opus".to_string();
+                            *channels = Some(self.read_u16(entry_offset + 24) as u32);
+                            *sample_rate = Some(48000);
                         }
                         entry_offset += entry_size;
                     }
@@ -653,9 +801,12 @@ impl<'a> Mp4Demuxer<'a> {
 
         Some(RustDemuxedTrack {
             id: 1,
+            kind: "video".to_string(),
             codec,
             width,
             height,
+            channels: None,
+            sample_rate: None,
             timescale: 1_000_000,
             description,
             samples,

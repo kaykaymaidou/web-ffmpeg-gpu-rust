@@ -65,7 +65,7 @@ Add-Type -TypeDefinition $csharpCode
 # 1. Version test
 $verPtr = [NativeBridge]::web_ffmpeg_native_version()
 $ver = [System.Runtime.InteropServices.Marshal]::PtrToStringAnsi($verPtr)
-Write-Host "✅ [C-ABI Tier 1] Engine Version: $ver"
+Write-Host "[PASS] [c-abi:version] engine_version: $ver"
 if ($ver -notmatch "native") {
     throw "Version string does not contain 'native'"
 }
@@ -73,7 +73,7 @@ if ($ver -notmatch "native") {
 # 2. Filtergraph parse test
 [UIntPtr]$nodeCount = [UIntPtr]::Zero
 $status = [NativeBridge]::web_ffmpeg_native_parse_filtergraph_count("scale=1920:1080,fps=60,format=nv12", [ref]$nodeCount)
-Write-Host "✅ [C-ABI Tier 2] Filtergraph Parse Status: $status, Nodes: $nodeCount"
+Write-Host "[PASS] [c-abi:filtergraph] status: $status, nodes: $nodeCount"
 if ($status -ne 0 -or $nodeCount.ToUInt64() -ne 3) {
     throw "Filtergraph node count mismatch: expected 3, got $nodeCount"
 }
@@ -97,7 +97,7 @@ $audioStatus = [NativeBridge]::web_ffmpeg_native_resample_audio(
     [ref]$outAudioLen
 )
 
-Write-Host "✅ [C-ABI Tier 3] Audio Resample 48k->16k Status: $audioStatus, Out Length: $outAudioLen"
+Write-Host "[PASS] [c-abi:audio_resample] status: $audioStatus, output_samples: $outAudioLen"
 if ($audioStatus -ne 0 -or $outAudioLen.ToUInt64() -ne 160) {
     throw "Resample output length mismatch: expected 160, got $outAudioLen"
 }
@@ -114,7 +114,7 @@ $mixStatus = [NativeBridge]::web_ffmpeg_native_mix_stereo_to_mono(
     [ref]$outMonoPtr,
     [ref]$outMonoLen
 )
-Write-Host "✅ [C-ABI Tier 4] Stereo->Mono Mix Status: $mixStatus, Out Samples: $outMonoLen"
+Write-Host "[PASS] [c-abi:audio_mix] status: $mixStatus, output_samples: $outMonoLen"
 if ($mixStatus -ne 0 -or $outMonoLen.ToUInt64() -ne 2) {
     throw "Mix output length mismatch: expected 2, got $outMonoLen"
 }
@@ -131,7 +131,7 @@ $convStatus = [NativeBridge]::web_ffmpeg_native_annex_b_to_avcc(
     [ref]$outAvccPtr,
     [ref]$outAvccLen
 )
-Write-Host "✅ [C-ABI Tier 5] Annex-B->AVCC NAL Conversion Status: $convStatus, Out Bytes: $outAvccLen"
+Write-Host "[PASS] [c-abi:annex_b_avcc] status: $convStatus, output_bytes: $outAvccLen"
 if ($convStatus -ne 0 -or $outAvccLen.ToUInt64() -ne 8) {
     throw "AVCC conversion length mismatch: expected 8, got $outAvccLen"
 }
@@ -153,10 +153,10 @@ if (Test-Path $bbbPath) {
     )
     $sw.Stop()
 
-    Write-Host "✅ [C-ABI Tier 6] Real Media Big Buck Bunny Demuxed in $($sw.Elapsed.TotalMilliseconds.ToString('F3')) ms! Status: $demuxStatus, Tracks: $tracks, Total Samples: $samples"
+    Write-Host "[PASS] [c-abi:demux_real_media] time: $($sw.Elapsed.TotalMilliseconds.ToString('F3'))ms, status: $demuxStatus, tracks: $tracks, samples: $samples"
     if ($demuxStatus -ne 0 -or $tracks.ToUInt64() -lt 1 -or $samples.ToUInt64() -lt 100) {
         throw "Real MP4 demux verification failed!"
     }
 }
 
-Write-Host "`n🎉 All 6 C-ABI Tiers PASSED with Zero-Panic, Zero-Leak, and Sub-Millisecond Speed!"
+Write-Host "`n[OK] 6 C-ABI FFI test assertions passed."

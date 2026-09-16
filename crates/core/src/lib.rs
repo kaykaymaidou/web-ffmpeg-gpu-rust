@@ -46,7 +46,7 @@ extern "C" {
 /// Initialize panic hook and logging for debugging in browser console.
 #[wasm_bindgen]
 pub fn init_core() {
-    log("🚀 [Web-FFmpeg-Core] Rust Native WASM Media Engine initialized successfully.");
+    log("[web-ffmpeg-core] WASM media engine initialized");
 }
 
 /// Inspect capabilities and print version.
