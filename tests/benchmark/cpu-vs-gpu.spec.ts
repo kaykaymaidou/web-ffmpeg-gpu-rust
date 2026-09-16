@@ -60,7 +60,7 @@ test.describe('Empirical Benchmark: CPU Processing vs WebGPU Shader Execution', 
       };
     });
 
-    console.log('📊 [Benchmark Results (1080p)]:', benchmarkResults);
+    console.log('[Benchmark Results (1080p)]:', benchmarkResults);
     expect(benchmarkResults.cpuProcessingTimeMs).toBeGreaterThan(0);
   });
 });

@@ -68,7 +68,7 @@ export class HardwareAudioDecoder {
         this.onDataCallback(data);
       },
       error: (e: DOMException) => {
-        console.error('🚨 [HardwareAudioDecoder Error]:', e);
+        console.error('[HardwareAudioDecoder Error]:', e);
         if (this.onErrorCallback) {
           this.onErrorCallback(e);
         }

@@ -47,7 +47,7 @@ export async function startStdioServer(): Promise<void> {
     }
   });
 
-  process.stderr.write('🚀 [Web-FFmpeg-GPU MCP] Agent Server listening on stdio (JSON-RPC 2.0)\n');
+  process.stderr.write('[web-ffmpeg-gpu-mcp] Server listening on stdio (JSON-RPC 2.0)\n');
 }
 
 // Auto-start if executed directly via Node CLI

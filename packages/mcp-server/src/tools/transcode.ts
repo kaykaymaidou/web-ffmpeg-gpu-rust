@@ -46,7 +46,7 @@ export async function handleTranscodeVideo(args: {
       content: [
         {
           type: 'text',
-          text: `❌ Input file not found: ${inputPath}`,
+          text: `[ERROR] Input file not found: ${inputPath}`,
         },
       ],
     };
@@ -71,7 +71,7 @@ export async function handleTranscodeVideo(args: {
         content: [
           {
             type: 'text',
-            text: `❌ No video track found in ${inputPath}.`,
+            text: `[ERROR] No video track found in ${inputPath}.`,
           },
         ],
       };
@@ -148,7 +148,7 @@ export async function handleTranscodeVideo(args: {
       content: [
         {
           type: 'text',
-          text: `### ⚡ FastStart Transcode Complete\n\n` +
+          text: `### FastStart Transcode Complete\n\n` +
             `- **Source**: \`${inputPath}\` (${origMb} MB)\n` +
             `- **Destination**: \`${outputPath}\` (${outMb} MB)\n` +
             `- **Preset**: \`${preset}\`\n` +
@@ -156,7 +156,7 @@ export async function handleTranscodeVideo(args: {
             `- **Frames Processed**: ${videoTrack.samples.length} frames\n` +
             `- **Processing Time**: ${elapsedMs.toFixed(1)} ms\n` +
             `- **FastStart Optimized**: \`moov\` placed at byte offset 16 (before \`mdat\` for HTTP 206 instant playback)\n\n` +
-            `✅ File is verified ready for CDN streaming or social web sharing.`,
+            `File is verified ready for CDN streaming or social web sharing.`,
         },
       ],
     };
@@ -166,7 +166,7 @@ export async function handleTranscodeVideo(args: {
       content: [
         {
           type: 'text',
-          text: `❌ Error during transcoding: ${err.message || err}`,
+          text: `[ERROR] Error during transcoding: ${err.message || err}`,
         },
       ],
     };

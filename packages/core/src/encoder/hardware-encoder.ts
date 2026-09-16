@@ -72,7 +72,7 @@ export class HardwareVideoEncoder {
         this.onChunkCallback(chunk, metadata);
       },
       error: (e: DOMException) => {
-        console.error('🚨 [HardwareVideoEncoder Error]:', e);
+        console.error('[HardwareVideoEncoder Error]:', e);
         if (this.onErrorCallback) {
           this.onErrorCallback(e);
         }

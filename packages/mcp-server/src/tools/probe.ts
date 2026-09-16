@@ -26,7 +26,7 @@ export async function handleProbeMedia(args: { filePath: string }): Promise<McpT
       content: [
         {
           type: 'text',
-          text: `❌ Error: Video file not found at path: ${filePath}`,
+          text: `[ERROR] Video file not found at path: ${filePath}`,
         },
       ],
     };
@@ -52,12 +52,12 @@ export async function handleProbeMedia(args: { filePath: string }): Promise<McpT
     let hasRetrogradePts = false;
 
     if (!videoTrack) {
-      issues.push('❌ [FAIL-05] No valid video track or moov box found. File may be truncated; activate salvage mode to recover.');
+      issues.push('[FAIL-05] No valid video track or moov box found. File may be truncated; activate salvage mode to recover.');
     } else {
       // Check FAIL-01
       if (videoTrack.samples.length > 0 && videoTrack.samples[0].type !== 'key') {
         isDirtyPrefix = true;
-        issues.push('⚠️ [FAIL-01] Video stream starts with non-IDR delta frames (Dirty Prefix). Decoders may show green screens unless sanitized.');
+        issues.push('[FAIL-01] Video stream starts with non-IDR delta frames (Dirty Prefix). Decoders may show green screens unless sanitized.');
       }
 
       // Check FAIL-03
@@ -69,10 +69,10 @@ export async function handleProbeMedia(args: { filePath: string }): Promise<McpT
       }
 
       if (hasNegativePts) {
-        issues.push('⚠️ [FAIL-03] Negative PTS detected in bitstream timestamps.');
+        issues.push('[FAIL-03] Negative PTS detected in bitstream timestamps.');
       }
       if (hasRetrogradePts) {
-        issues.push('⚠️ [FAIL-03] Retrograde (backwards) timestamps detected in bitstream.');
+        issues.push('[FAIL-03] Retrograde (backwards) timestamps detected in bitstream.');
       }
     }
 
@@ -115,11 +115,11 @@ export async function handleProbeMedia(args: { filePath: string }): Promise<McpT
       content: [
         {
           type: 'text',
-          text: `### 📊 Media Probe Report: \`${filePath}\`\n\n` +
+          text: `### Media Probe Report: \`${filePath}\`\n\n` +
             `\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n\n` +
             (issues.length > 0
               ? `**Detected Stream Anomalies:**\n${issues.map((i) => `- ${i}`).join('\n')}`
-              : `✅ **Stream Status**: Pristine container, 0 anomalies detected.`),
+              : `**Stream Status**: Pristine container, 0 anomalies detected.`),
         },
       ],
     };
@@ -129,7 +129,7 @@ export async function handleProbeMedia(args: { filePath: string }): Promise<McpT
       content: [
         {
           type: 'text',
-          text: `❌ Exception during media probe: ${err.message || err}`,
+          text: `[ERROR] Exception during media probe: ${err.message || err}`,
         },
       ],
     };

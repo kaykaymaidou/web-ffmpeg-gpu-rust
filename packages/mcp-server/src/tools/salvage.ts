@@ -30,7 +30,7 @@ export async function handleSalvageMp4(args: { inputPath: string; outputPath: st
       content: [
         {
           type: 'text',
-          text: `❌ Input file not found: ${inputPath}`,
+          text: `[ERROR] Input file not found: ${inputPath}`,
         },
       ],
     };
@@ -53,7 +53,7 @@ export async function handleSalvageMp4(args: { inputPath: string; outputPath: st
         content: [
           {
             type: 'text',
-            text: `❌ Failed to salvage video: 0 valid Annex-B slices found in raw mdat bitstream.`,
+            text: `[ERROR] Failed to salvage video: 0 valid Annex-B slices found in raw mdat bitstream.`,
           },
         ],
       };
@@ -85,12 +85,12 @@ export async function handleSalvageMp4(args: { inputPath: string; outputPath: st
       content: [
         {
           type: 'text',
-          text: `### 🛠️ Stream Salvage Success (FAIL-05 Autocorrection)\n\n` +
+          text: `### Stream Salvage Success (FAIL-05 Autocorrection)\n\n` +
             `- **Damaged Input**: \`${inputPath}\` (${fileBuffer.byteLength} bytes)\n` +
             `- **Repaired Output**: \`${outputPath}\` (${repairedBuffer.byteLength} bytes)\n` +
             `- **Salvaged Frames**: ${writtenFrames} frames successfully recovered\n` +
             `- **Container Structure**: FastStart ISOBMFF compliant (\`moov\` placed before \`mdat\`)\n\n` +
-            `✅ The repaired video is now playable and seeks instantly.`,
+            `Status: The repaired video is now playable and seeks normally.`,
         },
       ],
     };
@@ -100,7 +100,7 @@ export async function handleSalvageMp4(args: { inputPath: string; outputPath: st
       content: [
         {
           type: 'text',
-          text: `❌ Exception during stream salvage: ${err.message || err}`,
+          text: `[ERROR] Exception during stream salvage: ${err.message || err}`,
         },
       ],
     };

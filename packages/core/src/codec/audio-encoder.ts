@@ -67,7 +67,7 @@ export class HardwareAudioEncoder {
         this.onChunkCallback(chunk, metadata);
       },
       error: (e: DOMException) => {
-        console.error('🚨 [HardwareAudioEncoder Error]:', e);
+        console.error('[HardwareAudioEncoder Error]:', e);
         if (this.onErrorCallback) {
           this.onErrorCallback(e);
         }

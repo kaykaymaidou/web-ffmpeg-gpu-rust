@@ -227,7 +227,7 @@ const autopilotAgent = new MediaAutopilotAgent({
     const dirLine = document.createElement('div');
     dirLine.style.color = '#34d399';
     dirLine.style.fontWeight = 'bold';
-    dirLine.textContent = `⚡ [Directive] ${directive.type} -> ${directive.reason}`;
+    dirLine.textContent = `[Directive] ${directive.type} -> ${directive.reason}`;
     autopilotTerminal.appendChild(dirLine);
     autopilotTerminal.scrollTop = autopilotTerminal.scrollHeight;
 
@@ -660,7 +660,7 @@ function setupEventListeners() {
           ctxHost.fillRect(0, 0, 640, 360);
           ctxHost.fillStyle = '#ffffff';
           ctxHost.font = 'bold 24px system-ui, sans-serif';
-          ctxHost.fillText(`🎤 主播视频流 (Host Channel) #${frameIdx}`, 30, 50);
+          ctxHost.fillText(`主播视频流 (Host Channel) #${frameIdx}`, 30, 50);
 
           // 2. Draw animated Guest canvas
           ctxGuest.fillStyle = '#0f172a';
@@ -673,7 +673,7 @@ function setupEventListeners() {
           ctxGuest.fill();
           ctxGuest.fillStyle = '#f8fafc';
           ctxGuest.font = '14px system-ui, sans-serif';
-          ctxGuest.fillText('👤 连麦嘉宾 (Guest 1)', 20, 30);
+          ctxGuest.fillText('连麦嘉宾 (Guest 1)', 20, 30);
 
           // 3. Draw animated Screen canvas
           ctxScreen.fillStyle = '#020617';
@@ -688,7 +688,7 @@ function setupEventListeners() {
           }
           ctxScreen.fillStyle = '#10b981';
           ctxScreen.font = 'bold 20px monospace';
-          ctxScreen.fillText(`🖥️ 屏幕共享: 实时计算中 (Frame: ${frameIdx})`, 30, 40);
+          ctxScreen.fillText(`屏幕共享: 实时计算中 (Frame: ${frameIdx})`, 30, 40);
 
           // Push frames into compositor (strict RAII internally)
           const fHost = new VideoFrame(cHost, { timestamp: frameIdx * 16666 });
@@ -1035,10 +1035,10 @@ function setupEventListeners() {
       try {
         const demuxer = new SimpleMp4Demuxer(buffer);
         const tracks = demuxer.parse();
-        let treeText = `📦 Container: ISOBMFF (${(file.size / (1024 * 1024)).toFixed(2)} MB)\n`;
+        let treeText = `Container: ISOBMFF (${(file.size / (1024 * 1024)).toFixed(2)} MB)\n`;
         tracks.forEach((t) => {
           const isVid = t.codec.startsWith('avc1') || t.codec.startsWith('hvc1');
-          treeText += `├── 🎞️ Track #${t.id} (${isVid ? 'Video' : 'Audio'}): ${t.codec}\n`;
+          treeText += `├── Track #${t.id} (${isVid ? 'Video' : 'Audio'}): ${t.codec}\n`;
           if (isVid) {
             treeText += `│   ├── 分辨率: ${t.width}x${t.height}\n`;
             treeText += `│   ├── 样本帧数: ${t.samples.length} frames\n`;
@@ -1048,7 +1048,7 @@ function setupEventListeners() {
             treeText += `│   └── 样本包数: ${t.samples.length} packets\n`;
           }
         });
-        treeText += `└── ⚡ 导出格式: 纯 Rust FastStart MP4 (moov 置前秒开)`;
+        treeText += `└── 导出格式: 纯 Rust FastStart MP4 (moov 置前秒开)`;
         boxTreeContent.textContent = treeText;
       } catch (err) {
         boxTreeContent.textContent = `Box 解析警告: ${err}`;
@@ -1067,7 +1067,7 @@ function setupEventListeners() {
     try {
       btnStartTranscode.disabled = true;
       transcodeProgressSection.style.display = 'block';
-      transcodeStatusLabel.textContent = '⚡ GPU 硬件硬编转码中...';
+      transcodeStatusLabel.textContent = 'GPU 硬件硬编转码中...';
       transcodePercent.textContent = '0%';
       progressFill.style.width = '0%';
       btnDownloadMp4.style.display = 'none';
@@ -1092,7 +1092,7 @@ function setupEventListeners() {
       lastTranscodeResult = result;
       transcodePercent.textContent = '100%';
       progressFill.style.width = '100%';
-      transcodeStatusLabel.textContent = `✅ 转码完成! 耗时 ${(result.totalTimeMs / 1000).toFixed(2)}s (平均 ${result.avgFps} FPS, ${result.avgRealtime}x 极速)`;
+      transcodeStatusLabel.textContent = `转码完成! 耗时 ${(result.totalTimeMs / 1000).toFixed(2)}s (平均 ${result.avgFps} FPS, ${result.avgRealtime}x 极速)`;
 
       const origMb = (result.originalSizeBytes / (1024 * 1024)).toFixed(1);
       const outMb = (result.outputSizeBytes / (1024 * 1024)).toFixed(1);
@@ -1105,7 +1105,7 @@ function setupEventListeners() {
       transcodedVideoPreview.style.display = 'block';
     } catch (err: any) {
       console.error('Transcode Failed:', err);
-      transcodeStatusLabel.textContent = `❌ 转码失败: ${err.message || err}`;
+      transcodeStatusLabel.textContent = `转码失败: ${err.message || err}`;
       alert(`转码失败: ${err.message || err}`);
     } finally {
       btnStartTranscode.disabled = false;

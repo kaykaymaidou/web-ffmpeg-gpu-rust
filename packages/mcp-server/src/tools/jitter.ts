@@ -64,7 +64,7 @@ export async function handleDiagnoseJitter(args: {
     content: [
       {
         type: 'text',
-        text: `### 📡 Live Stream & Lip-Sync Diagnosis (RFC 0002)\n\n` +
+        text: `### Live Stream & Lip-Sync Diagnosis (RFC 0002)\n\n` +
           `\`\`\`json\n${JSON.stringify(diagnosis, null, 2)}\n\`\`\`\n\n` +
           `**Analysis Summary:**\n` +
           `- **Without web-ffmpeg-gpu**: After ${durationMin} minutes, the browser WebCodecs dual-clock drift will create **${accumulatedDriftMs}ms** of audio-video desync.\n` +

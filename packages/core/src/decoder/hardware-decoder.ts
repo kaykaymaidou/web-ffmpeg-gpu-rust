@@ -61,7 +61,7 @@ export class HardwareVideoDecoder {
       },
       error: (e: DOMException) => {
         this.totalDropped++;
-        console.error('🚨 [HardwareVideoDecoder Error]:', e);
+        console.error('[HardwareVideoDecoder Error]:', e);
         if (this.onErrorCallback) {
           this.onErrorCallback(e);
         }

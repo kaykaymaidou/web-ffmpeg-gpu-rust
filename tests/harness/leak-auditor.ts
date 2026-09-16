@@ -43,7 +43,7 @@ export class VramLeakAuditor {
   public assertZeroLeak(contextName: string = 'Pipeline'): void {
     if (this.activeHandles !== 0) {
       throw new Error(
-        `🚨 [VRAM Leak Detected in ${contextName}]: ${this.activeHandles} VideoFrame handle(s) remained unclosed! Allocated: ${this.allocatedCount}, Closed: ${this.closedCount}`
+        `[VRAM Leak Detected in ${contextName}]: ${this.activeHandles} VideoFrame handle(s) remained unclosed! Allocated: ${this.allocatedCount}, Closed: ${this.closedCount}`
       );
     }
   }
