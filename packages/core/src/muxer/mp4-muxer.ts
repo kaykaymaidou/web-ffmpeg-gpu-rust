@@ -1,9 +1,15 @@
+export type MuxerVideoCodec = 'avc1' | 'hvc1';
+
 export interface MuxerVideoTrack {
   width: number;
   height: number;
   timescale: number;
-  sps: Uint8Array;
-  pps: Uint8Array;
+  /** ISOBMFF sample entry fourcc. Defaults to avc1. */
+  codec?: MuxerVideoCodec;
+  /** Raw avcC / hvcC payload (without the box header). Preferred over sps/pps. */
+  description?: Uint8Array;
+  sps?: Uint8Array;
+  pps?: Uint8Array;
 }
 
 export interface MuxerAudioTrack {
@@ -17,6 +23,7 @@ interface MuxerSample {
   isVideo: boolean;
   isKey: boolean;
   durationTicks: number;
+  compositionOffsetTicks: number;
   data: Uint8Array;
   relativeOffset: number;
 }
@@ -45,11 +52,17 @@ export class FastStartMp4Muxer {
     this.audioTrack = track;
   }
 
-  public writeVideoSample(data: Uint8Array, durationTicks: number, isKey: boolean): void {
+  public writeVideoSample(
+    data: Uint8Array,
+    durationTicks: number,
+    isKey: boolean,
+    compositionOffsetTicks: number = 0
+  ): void {
     const sample: MuxerSample = {
       isVideo: true,
       isKey,
       durationTicks,
+      compositionOffsetTicks,
       data,
       relativeOffset: this.totalPayloadBytes,
     };
@@ -62,6 +75,7 @@ export class FastStartMp4Muxer {
       isVideo: false,
       isKey: true,
       durationTicks,
+      compositionOffsetTicks: 0,
       data,
       relativeOffset: this.totalPayloadBytes,
     };
@@ -112,15 +126,25 @@ export class FastStartMp4Muxer {
   }
 
   private buildFtyp(): Uint8Array {
+    const isHevc = this.videoCodec() === 'hvc1';
     const payload = new Uint8Array(24);
     const view = new DataView(payload.buffer);
     payload.set([0x69, 0x73, 0x6f, 0x6d], 0); // 'isom' major brand
     view.setUint32(4, 0x00000200); // minor version
     payload.set([0x69, 0x73, 0x6f, 0x6d], 8);  // isom
-    payload.set([0x69, 0x73, 0x6f, 0x32], 12); // iso2
-    payload.set([0x61, 0x76, 0x63, 0x31], 16); // avc1
+    if (isHevc) {
+      payload.set([0x69, 0x73, 0x6f, 0x36], 12); // iso6
+      payload.set([0x68, 0x76, 0x63, 0x31], 16); // hvc1
+    } else {
+      payload.set([0x69, 0x73, 0x6f, 0x32], 12); // iso2
+      payload.set([0x61, 0x76, 0x63, 0x31], 16); // avc1
+    }
     payload.set([0x6d, 0x70, 0x34, 0x31], 20); // mp41
     return this.box('ftyp', payload);
+  }
+
+  private videoCodec(): MuxerVideoCodec {
+    return this.videoTrack?.codec ?? 'avc1';
   }
 
   private buildMoov(baseOffset: number): Uint8Array {
@@ -226,6 +250,10 @@ export class FastStartMp4Muxer {
     const videoRuns = this.chunkRuns(samples);
     stblChildren.push(this.buildStsdVideo(config));
     stblChildren.push(this.buildStts(samples));
+    const ctts = this.buildCtts(samples);
+    if (ctts) {
+      stblChildren.push(ctts);
+    }
     stblChildren.push(this.buildStss(samples));
     stblChildren.push(this.buildStsc(videoRuns));
     stblChildren.push(this.buildStsz(samples));
@@ -309,43 +337,53 @@ export class FastStartMp4Muxer {
   }
 
   private buildStsdVideo(config: MuxerVideoTrack): Uint8Array {
-    // avcC
-    const avccPayload = new Uint8Array(11 + config.sps.byteLength + config.pps.byteLength);
-    avccPayload[0] = 1; // configurationVersion
-    avccPayload[1] = config.sps[1] || 0x42;
-    avccPayload[2] = config.sps[2] || 0x00;
-    avccPayload[3] = config.sps[3] || 0x1e;
-    avccPayload[4] = 0xff; // lengthSizeMinusOne: 4-byte NAL
-    avccPayload[5] = 0xe1; // 1 SPS
-    new DataView(avccPayload.buffer).setUint16(6, config.sps.byteLength);
-    avccPayload.set(config.sps, 8);
-    const ppsOffset = 8 + config.sps.byteLength;
-    avccPayload[ppsOffset] = 1; // 1 PPS
-    new DataView(avccPayload.buffer).setUint16(ppsOffset + 1, config.pps.byteLength);
-    avccPayload.set(config.pps, ppsOffset + 3);
+    const codec = config.codec ?? 'avc1';
+    const configPayload = config.description
+      ? config.description
+      : this.buildAvccFromSpsPps(config);
+    const configBox = this.box(codec === 'hvc1' ? 'hvcC' : 'avcC', configPayload);
 
-    const avccBox = this.box('avcC', avccPayload);
+    const visualPayload = new Uint8Array(78 + configBox.byteLength);
+    const visualView = new DataView(visualPayload.buffer);
+    visualView.setUint16(6, 1); // data_reference_index
+    visualView.setUint16(24, config.width);
+    visualView.setUint16(26, config.height);
+    visualView.setUint32(28, 0x00480000); // 72 dpi
+    visualView.setUint32(32, 0x00480000); // 72 dpi
+    visualView.setUint16(40, 1); // frame_count
+    visualView.setUint16(74, 0x0018); // depth 24
+    visualView.setInt16(76, -1);
+    visualPayload.set(configBox, 78);
 
-    // avc1
-    const avc1Payload = new Uint8Array(78 + avccBox.byteLength);
-    const avc1View = new DataView(avc1Payload.buffer);
-    avc1View.setUint16(6, 1); // data_reference_index
-    avc1View.setUint16(24, config.width);
-    avc1View.setUint16(26, config.height);
-    avc1View.setUint32(28, 0x00480000); // 72 dpi
-    avc1View.setUint32(32, 0x00480000); // 72 dpi
-    avc1View.setUint16(40, 1); // frame_count
-    avc1View.setUint16(74, 0x0018); // depth 24
-    avc1View.setInt16(76, -1);
-    avc1Payload.set(avccBox, 78);
+    const sampleEntry = this.box(codec === 'hvc1' ? 'hvc1' : 'avc1', visualPayload);
 
-    const avc1Box = this.box('avc1', avc1Payload);
-
-    const stsdPayload = new Uint8Array(8 + avc1Box.byteLength);
+    const stsdPayload = new Uint8Array(8 + sampleEntry.byteLength);
     new DataView(stsdPayload.buffer).setUint32(4, 1); // 1 entry
-    stsdPayload.set(avc1Box, 8);
+    stsdPayload.set(sampleEntry, 8);
 
     return this.box('stsd', stsdPayload);
+  }
+
+  private buildAvccFromSpsPps(config: MuxerVideoTrack): Uint8Array {
+    const sps = config.sps;
+    const pps = config.pps;
+    if (!sps || !pps) {
+      throw new Error('FastStartMp4Muxer: H.264 track requires description or sps/pps');
+    }
+    const avccPayload = new Uint8Array(11 + sps.byteLength + pps.byteLength);
+    avccPayload[0] = 1;
+    avccPayload[1] = sps[1] || 0x42;
+    avccPayload[2] = sps[2] || 0x00;
+    avccPayload[3] = sps[3] || 0x1e;
+    avccPayload[4] = 0xff;
+    avccPayload[5] = 0xe1;
+    new DataView(avccPayload.buffer).setUint16(6, sps.byteLength);
+    avccPayload.set(sps, 8);
+    const ppsOffset = 8 + sps.byteLength;
+    avccPayload[ppsOffset] = 1;
+    new DataView(avccPayload.buffer).setUint16(ppsOffset + 1, pps.byteLength);
+    avccPayload.set(pps, ppsOffset + 3);
+    return avccPayload;
   }
 
   private buildStsdAudio(config: MuxerAudioTrack): Uint8Array {
@@ -434,6 +472,45 @@ export class FastStartMp4Muxer {
       offset += 8;
     }
     return this.box('stts', payload);
+  }
+
+  private buildCtts(samples: MuxerSample[]): Uint8Array | null {
+    const hasOffset = samples.some((s) => s.compositionOffsetTicks !== 0);
+    if (!hasOffset) {
+      return null;
+    }
+    const useSigned = samples.some((s) => s.compositionOffsetTicks < 0);
+    const version = useSigned ? 1 : 0;
+
+    const entries: Array<{ count: number; offset: number }> = [];
+    let curCount = 1;
+    let curOff = samples[0].compositionOffsetTicks;
+    for (let i = 1; i < samples.length; i++) {
+      if (samples[i].compositionOffsetTicks === curOff) {
+        curCount++;
+      } else {
+        entries.push({ count: curCount, offset: curOff });
+        curCount = 1;
+        curOff = samples[i].compositionOffsetTicks;
+      }
+    }
+    entries.push({ count: curCount, offset: curOff });
+
+    const payload = new Uint8Array(8 + entries.length * 8);
+    const view = new DataView(payload.buffer);
+    payload[0] = version;
+    view.setUint32(4, entries.length);
+    let offset = 8;
+    for (const e of entries) {
+      view.setUint32(offset, e.count);
+      if (useSigned) {
+        view.setInt32(offset + 4, e.offset);
+      } else {
+        view.setUint32(offset + 4, e.offset);
+      }
+      offset += 8;
+    }
+    return this.box('ctts', payload);
   }
 
   private buildStss(samples: MuxerSample[]): Uint8Array {

@@ -1,19 +1,44 @@
 {
   "name": "@web-ffmpeg-gpu/core",
   "version": "0.1.0",
-  "description": "Next-Gen Web-FFmpeg Core Engine: WebCodecs Hardware Acceleration + WebGPU Shader Pipelines",
+  "description": "Web-FFmpeg GPU core SDK: Node remux (concatCopy/probe) + browser WebCodecs/WebGPU",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "node": {
+        "types": "./dist/node.d.ts",
+        "import": "./dist/node.js"
+      },
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./web": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "prepare": "tsc",
+    "prepack": "tsc",
+    "test:node": "node --test test/concat-copy.test.mjs"
   },
   "keywords": [
     "ffmpeg",

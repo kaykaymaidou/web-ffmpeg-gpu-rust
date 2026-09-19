@@ -5,7 +5,7 @@ export { HardwareVideoDecoder } from './decoder/hardware-decoder';
 export { HardwareVideoEncoder, type VideoEncoderOptions, type ChunkCallback } from './encoder/hardware-encoder';
 export { HardwareAudioEncoder, type AudioEncoderOptions, type AudioChunkCallback } from './codec/audio-encoder';
 export { HardwareAudioDecoder, type AudioDecoderOptions, type AudioDataCallback } from './codec/audio-decoder';
-export { FastStartMp4Muxer, type MuxerVideoTrack, type MuxerAudioTrack } from './muxer/mp4-muxer';
+export { FastStartMp4Muxer, type MuxerVideoTrack, type MuxerAudioTrack, type MuxerVideoCodec } from './muxer/mp4-muxer';
 export {
   WebFfmpegTranscoder,
   type TranscodePreset,
@@ -23,6 +23,17 @@ export {
   type MultiCompositorOptions,
 } from './renderer/multi-compositor';
 export { SimpleMp4Demuxer, type DemuxedTrack, type DemuxedSample } from './demuxer/mp4-demuxer';
+export { concatCopy, ConcatCopyError } from './concat/concat-copy';
+export { probe, probeMp4, type ProbeInfo } from './concat/probe';
+export { trimCopy, type TrimCopyOptions } from './concat/trim-copy';
+export {
+  concatXfade,
+  concatTranscode,
+  extractStills,
+  type ConcatXfadeOptions,
+  type ConcatTranscodeOptions,
+  type ExtractStillsOptions,
+} from './concat/pixel-ops';
 export { WebmDemuxer, type WebmTrackInfo, type WebmSample } from './demuxer/webm-demuxer';
 export { AudioDsp, type AudioResampleOptions } from './audio/audio-dsp';
 export { FilterGraphPlanner, type FilterNodePlan } from './filter/filtergraph';

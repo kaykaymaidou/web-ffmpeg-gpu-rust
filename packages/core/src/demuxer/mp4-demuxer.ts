@@ -1,7 +1,10 @@
 export interface DemuxedSample {
   type: 'key' | 'delta';
-  timestamp: number; // in microseconds
+  timestamp: number; // PTS in microseconds
   duration: number;  // in microseconds
+  dtsTicks: number;
+  durationTicks: number;
+  compositionOffsetTicks: number;
   data: Uint8Array;
 }
 
@@ -199,7 +202,7 @@ export class SimpleMp4Demuxer {
         for (let i = 0; i < entryCount; i++) {
           const entrySize = this.view.getUint32(entryOffset);
           const format = this.getString(entryOffset + 4, 4);
-          if (format === 'avc1' || format === 'hvc1' || format === 'vp09' || format === 'av01') {
+          if (format === 'avc1' || format === 'avc3' || format === 'hvc1' || format === 'hev1' || format === 'vp09' || format === 'av01') {
             trackKind = 'video';
             trackWidth = this.view.getUint16(entryOffset + 32);
             trackHeight = this.view.getUint16(entryOffset + 34);
@@ -216,7 +219,7 @@ export class SimpleMp4Demuxer {
                 codecString = `avc1.${profile}${compat}${level}`;
               } else if (subType === 'hvcC' && subSize > 8) {
                 descBytes = new Uint8Array(this.buffer, subOffset + 8, subSize - 8);
-                codecString = 'hvc1.1.6.L93.B0';
+                codecString = format === 'hev1' ? 'hev1.1.6.L93.B0' : 'hvc1.1.6.L93.B0';
               }
               subOffset += subSize;
             }
@@ -355,6 +358,9 @@ export class SimpleMp4Demuxer {
           type: isKey ? 'key' : 'delta',
           timestamp: Math.max(0, timestamp),
           duration: durationUs,
+          dtsTicks: decodeTicks,
+          durationTicks: delta,
+          compositionOffsetTicks: compositionTicks,
           // View into source buffer — matches Rust Mp4Demuxer offset/size. EncodedVideoChunk copies on construct.
           data: new Uint8Array(this.buffer, byteOffset, size),
         });
@@ -430,6 +436,9 @@ export class SimpleMp4Demuxer {
           type: isKey ? 'key' : 'delta',
           timestamp: frameIndex * 33333,
           duration: 33333,
+          dtsTicks: frameIndex * 1000,
+          durationTicks: 1000,
+          compositionOffsetTicks: 0,
           data: nalData,
         });
         frameIndex++;

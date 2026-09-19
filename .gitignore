@@ -18,6 +18,7 @@ build/
 **/build/
 .turbo/
 .npm/
+*.tgz
 
 # --- WASM Generated Artifacts ---
 *.wasm
@@ -100,3 +101,5 @@ desktop.ini
 .harness/
 .system_generated/
 scratch/
+learn/
+

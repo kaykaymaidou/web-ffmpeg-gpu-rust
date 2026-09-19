@@ -3,10 +3,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   SimpleMp4Demuxer,
-  FastStartMp4Muxer,
-  FilterGraphPlanner,
+  concatCopy,
+  probe,
+  trimCopy,
   type DemuxedTrack,
-  type DemuxedSample,
 } from '@web-ffmpeg-gpu/core';
 
 function printHelp() {
@@ -16,7 +16,7 @@ Usage: wff <command> [options]
 Commands:
   probe <input>                                 Inspect media container, tracks, and metadata
   trim  <input> -ss <sec> -to <sec> -o <output> Keyframe-aligned lossless stream slice
-  concat -i <f1> -i <f2> ... -o <output>        Concatenate streams with monotonic PTS
+  concat -i <f1> -i <f2> ... -o <output>        Concatenate streams with monotonic DTS
   filter-plan -i <input> -vf "<filters>"        Plan filtergraph nodes for WebGPU/CPU targets
   watermark-plan -i <input> -w <img.png>        Inspect zero-copy in-VRAM texture blend topology
   autocut-plan -i <input>                       Generate timeline edit list from audio energy
@@ -34,35 +34,23 @@ async function handleProbe(filePath: string) {
   }
 
   const startNs = process.hrtime.bigint();
-  const fileBytes = fs.readFileSync(filePath);
+  const fileBytes = new Uint8Array(fs.readFileSync(filePath));
   const readMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
 
   const parseStart = process.hrtime.bigint();
-  const demuxer = new SimpleMp4Demuxer(fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength));
-  const tracks = demuxer.parse();
+  const info = await probe(fileBytes);
   const parseMs = Number(process.hrtime.bigint() - parseStart) / 1_000_000;
 
   const fileSizeKb = (fileBytes.length / 1024).toFixed(1);
   console.log(`Input #0: ${path.resolve(filePath)} (${fileSizeKb} KB)`);
-  console.log(`  Format: isobmff/mp4, tracks: ${tracks.length}`);
-  console.log(`  Profile: read ${readMs.toFixed(2)}ms, demux ${parseMs.toFixed(3)}ms`);
-
-  for (let i = 0; i < tracks.length; i++) {
-    const t = tracks[i];
-    const totalDurationUs = t.samples.reduce((acc: number, s: DemuxedSample) => acc + s.duration, 0);
-    const durationSec = (totalDurationUs / 1_000_000).toFixed(2);
-    const avgFps = totalDurationUs > 0 ? ((t.samples.length / totalDurationUs) * 1_000_000).toFixed(2) : '30.00';
-    const keyframes = t.samples.filter((s: DemuxedSample) => s.type === 'key').length;
-
-    if (t.kind === 'audio' || t.channels) {
-      const chStr = t.channels === 1 ? 'mono' : t.channels === 2 ? 'stereo' : `${t.channels} channels`;
-      console.log(`  Stream #0:${i}: Audio: ${t.codec}, ${t.sampleRate || 48000} Hz, ${chStr}, ${durationSec}s (${t.samples.length} samples)`);
-    } else {
-      console.log(`  Stream #0:${i}: Video: ${t.codec}, ${t.width}x${t.height}, ${avgFps} fps, ${durationSec}s (${t.samples.length} frames, ${keyframes} keyframes)`);
-    }
-    if (t.description) {
-      console.log(`    Metadata: extradata=${t.description.length} bytes, timescale=${t.timescale}`);
-    }
+  console.log(`  Format: isobmff/mp4`);
+  console.log(`  Profile: read ${readMs.toFixed(2)}ms, probe ${parseMs.toFixed(3)}ms`);
+  console.log(`  Video: ${info.videoCodec}, ${info.width}x${info.height}, ${info.sampleCount} samples, ${(info.durationUs / 1_000_000).toFixed(2)}s, ${info.keyframeCount} keyframes`);
+  if (info.hasAudio) {
+    const ch = info.audioChannels === 1 ? 'mono' : info.audioChannels === 2 ? 'stereo' : `${info.audioChannels ?? '?'} channels`;
+    console.log(`  Audio: ${info.audioCodec}, ${info.audioSampleRate || 0} Hz, ${ch}`);
+  } else {
+    console.log(`  Audio: none`);
   }
 }
 
@@ -88,68 +76,17 @@ async function handleTrim(args: string[]) {
   }
 
   const startNs = process.hrtime.bigint();
-  const fileBytes = fs.readFileSync(inputFile);
-  const demuxer = new SimpleMp4Demuxer(fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength));
-  const tracks = demuxer.parse();
-
-  const videoTrack = tracks.find((t: DemuxedTrack) => t.width > 0 && t.height > 0);
-  if (!videoTrack) {
-    console.error('wff: error: no video track found in source container');
-    process.exit(1);
-  }
-
+  const fileBytes = new Uint8Array(fs.readFileSync(inputFile));
   const startUs = startSec * 1_000_000;
-  const endUs = endSec * 1_000_000;
-
-  const slicedSamples = videoTrack.samples.filter((s: DemuxedSample) => s.timestamp >= startUs && s.timestamp <= endUs);
-  if (slicedSamples.length === 0) {
-    console.error(`wff: error: no samples found in range [${startSec}s, ${endSec}s]`);
-    process.exit(1);
-  }
-
-  let firstKeyIdx = slicedSamples.findIndex((s: DemuxedSample) => s.type === 'key');
-  if (firstKeyIdx === -1) {
-    firstKeyIdx = 0;
-  }
-  const exportSamples = slicedSamples.slice(firstKeyIdx);
-
-  let sps = new Uint8Array([0x67, 0x42, 0x00, 0x1f, 0xe9, 0x01, 0x40, 0x7b, 0x40]);
-  let pps = new Uint8Array([0x68, 0xce, 0x38, 0x80]);
-
-  if (videoTrack.description && videoTrack.description.length > 10) {
-    try {
-      const d = videoTrack.description;
-      const spsLen = (d[6] << 8) | d[7];
-      if (8 + spsLen < d.length) {
-        sps = d.slice(8, 8 + spsLen);
-        const ppsOffset = 8 + spsLen + 1;
-        const ppsLen = (d[ppsOffset] << 8) | d[ppsOffset + 1];
-        pps = d.slice(ppsOffset + 2, ppsOffset + 2 + ppsLen);
-      }
-    } catch {
-      // retain fallback SPS/PPS
-    }
-  }
-
-  const muxer = new FastStartMp4Muxer();
-  muxer.setVideoTrack({
-    width: videoTrack.width,
-    height: videoTrack.height,
-    timescale: videoTrack.timescale || 30000,
-    sps,
-    pps,
-  });
-
-  const baseDurationTicks = Math.round((exportSamples[0].duration / 1_000_000) * (videoTrack.timescale || 30000)) || 1000;
-  for (const s of exportSamples) {
-    muxer.writeVideoSample(s.data, baseDurationTicks, s.type === 'key');
-  }
-
-  const resultBytes = muxer.finalize();
+  const endUs = Number.isFinite(endSec) ? endSec * 1_000_000 : undefined;
+  const resultBytes = await trimCopy(fileBytes, { startUs, endUs });
   fs.writeFileSync(outputFile, resultBytes);
 
+  const demuxer = new SimpleMp4Demuxer(resultBytes.buffer.slice(resultBytes.byteOffset, resultBytes.byteOffset + resultBytes.byteLength));
+  const tracks = demuxer.parse();
+  const videoTrack = tracks.find((t: DemuxedTrack) => t.kind === 'video');
   const totalMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
-  console.log(`Trim completed: ${startSec.toFixed(2)}s -> ${endSec === Infinity ? 'EOF' : endSec.toFixed(2) + 's'} (${exportSamples.length} frames)`);
+  console.log(`Trim completed: ${startSec.toFixed(2)}s -> ${endSec === Infinity ? 'EOF' : endSec.toFixed(2) + 's'} (${videoTrack?.samples.length ?? 0} frames)`);
   console.log(`Output: ${outputFile} (${(resultBytes.length / 1024).toFixed(1)} KB) [stream copy, faststart]`);
   console.log(`Execution time: ${totalMs.toFixed(2)}ms`);
 }
@@ -174,44 +111,26 @@ async function handleConcat(args: string[]) {
   }
 
   const startNs = process.hrtime.bigint();
-  let totalFrames = 0;
-  const muxer = new FastStartMp4Muxer();
-  let initialized = false;
-
+  const buffers: Uint8Array[] = [];
   for (const inp of inputs) {
     if (!fs.existsSync(inp)) {
       console.error(`wff: error: input file not found: ${inp}`);
       process.exit(1);
     }
-    const bytes = fs.readFileSync(inp);
-    const demuxer = new SimpleMp4Demuxer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    const tracks = demuxer.parse();
-    const vt = tracks.find((t: DemuxedTrack) => t.width > 0);
-    if (!vt) continue;
-
-    if (!initialized) {
-      muxer.setVideoTrack({
-        width: vt.width,
-        height: vt.height,
-        timescale: vt.timescale || 30000,
-        sps: new Uint8Array([0x67, 0x42, 0x00, 0x1f, 0xe9, 0x01, 0x40, 0x7b, 0x40]),
-        pps: new Uint8Array([0x68, 0xce, 0x38, 0x80]),
-      });
-      initialized = true;
-    }
-
-    for (const s of vt.samples) {
-      const ticks = Math.round((s.duration / 1_000_000) * (vt.timescale || 30000)) || 1000;
-      muxer.writeVideoSample(s.data, ticks, s.type === 'key');
-      totalFrames++;
-    }
+    buffers.push(new Uint8Array(fs.readFileSync(inp)));
   }
 
-  const result = muxer.finalize();
+  const result = await concatCopy(buffers);
   fs.writeFileSync(outputFile, result);
   const totalMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
 
-  console.log(`Concat completed: ${inputs.length} inputs (${totalFrames} frames merged)`);
+  const demuxer = new SimpleMp4Demuxer(result.buffer.slice(result.byteOffset, result.byteOffset + result.byteLength));
+  const tracks = demuxer.parse();
+  const vt = tracks.find((t: DemuxedTrack) => t.kind === 'video');
+  const at = tracks.find((t: DemuxedTrack) => t.kind === 'audio');
+  const totalFrames = vt?.samples.length ?? 0;
+
+  console.log(`Concat completed: ${inputs.length} inputs (${totalFrames} video samples${at ? `, ${at.samples.length} audio samples` : ', no audio'})`);
   console.log(`Output: ${outputFile} (${(result.length / 1024).toFixed(1)} KB) [faststart]`);
   console.log(`Execution time: ${totalMs.toFixed(2)}ms`);
 }
@@ -222,6 +141,8 @@ async function handleFilterPlan(args: string[]) {
     console.error('wff: error: usage: wff filter-plan -i <input.mp4> -vf "<filters>"');
     process.exit(1);
   }
+
+  const { FilterGraphPlanner } = await import('@web-ffmpeg-gpu/core/web');
 
   const filterStr = args[vfIdx + 1];
   console.log(`Filtergraph: "${filterStr}"`);
